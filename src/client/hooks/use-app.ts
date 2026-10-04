@@ -3,7 +3,7 @@ import { api } from "../api";
 import { today } from "../lib/dates";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
-  ClientLookup, StaffLookup, Invoice,
+  ClientLookup, StaffLookup, Invoice, Expense,
 } from "../types";
 import type { AppContextValue } from "../context";
 
@@ -47,6 +47,10 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const [invoicesPag, setInvoicesPag] = useState<PaginatedState>({ page: 1, limit: 50, total: 0 });
   const [invoicesStatusFilter, setInvoicesStatusFilter] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+
+  // Expenses
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expensesPag, setExpensesPag] = useState<PaginatedState>({ page: 1, limit: 50, total: 0 });
 
   // Lookups
   const [clientLookup, setClientLookup] = useState<ClientLookup[]>([]);
@@ -117,6 +121,13 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     setInvoicesPag((prev) => ({ ...prev, total: data.total }));
   }, []);
 
+  const fetchExpenses = useCallback(async (pag: PaginatedState) => {
+    const params = new URLSearchParams({ page: String(pag.page), limit: String(pag.limit) });
+    const data = await api<{ expenses: Expense[]; total: number }>("GET", `/api/expenses?${params}`);
+    setExpenses(data.expenses);
+    setExpensesPag((prev) => ({ ...prev, total: data.total }));
+  }, []);
+
   // ── Initial load ──
 
   useEffect(() => {
@@ -136,6 +147,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
             fetchProducts(productsPag, ""),
             fetchLookups(),
             fetchInvoices(invoicesPag, ""),
+            fetchExpenses(expensesPag),
           ]);
         }
       } catch (err) {
@@ -170,6 +182,11 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     if (!currentUser) return;
     fetchInvoices(invoicesPag, invoicesStatusFilter).catch((err) => setError((err as Error).message));
   }, [currentUser, invoicesPag.page, invoicesStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchExpenses(expensesPag).catch((err) => setError((err as Error).message));
+  }, [currentUser, expensesPag.page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Appointments CRUD ──
 
@@ -369,6 +386,23 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     setSelectedInvoice(res.invoice);
   }, []);
 
+  // ── Expenses CRUD ──
+
+  const setExpensesPage = useCallback((page: number) => setExpensesPag((p) => ({ ...p, page })), []);
+
+  const createExpense = useCallback(async (data: Partial<Expense>) => {
+    const res = await api<{ expense: Expense }>("POST", "/api/expenses", data);
+    await fetchExpenses(expensesPag);
+    await fetchStats();
+    return res.expense;
+  }, [expensesPag, fetchExpenses, fetchStats]);
+
+  const deleteExpense = useCallback(async (id: number) => {
+    await api("DELETE", `/api/expenses/${id}`);
+    await fetchExpenses(expensesPag);
+    await fetchStats();
+  }, [expensesPag, fetchExpenses, fetchStats]);
+
   return {
     navigate, isAgent, currentUser, setCurrentUser, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
@@ -386,6 +420,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     addProduct, updateProduct, deleteProduct,
     invoices, invoicesPag, setInvoicesPage, invoicesStatusFilter, setInvoicesStatusFilter,
     createInvoice, updateInvoiceStatus, selectedInvoice, selectInvoice,
+    expenses, expensesPag, setExpensesPage, createExpense, deleteExpense,
     clientLookup, staffLookup,
     loading, error, setError,
   };

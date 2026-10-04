@@ -2,7 +2,7 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
-  ClientLookup, StaffLookup, Invoice,
+  ClientLookup, StaffLookup, Invoice, Expense,
 } from "./types";
 
 export interface AppContextValue {
@@ -93,6 +93,13 @@ export interface AppContextValue {
   updateInvoiceStatus: (id: number, status: string, payment_method?: string) => Promise<void>;
   selectedInvoice: Invoice | null;
   selectInvoice: (id: number | null) => Promise<void>;
+
+  // Expenses
+  expenses: Expense[];
+  expensesPag: PaginatedState;
+  setExpensesPage: (page: number) => void;
+  createExpense: (data: Partial<Expense>) => Promise<Expense>;
+  deleteExpense: (id: number) => Promise<void>;
 
   // Lookups
   clientLookup: ClientLookup[];

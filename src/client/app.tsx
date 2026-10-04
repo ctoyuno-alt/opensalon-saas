@@ -14,6 +14,7 @@ import { StaffList } from "./components/staff-list";
 import { ServiceList } from "./components/service-list";
 import { ProductList } from "./components/product-list";
 import { PosBilling } from "./components/pos";
+import { Expenses } from "./components/expenses";
 import { ErrorBanner } from "./components/error-banner";
 import { Login } from "./components/login";
 
@@ -52,6 +53,7 @@ export function App() {
       case "services": return <ServiceList />;
       case "products": return <ProductList />;
       case "pos": return <PosBilling />;
+      case "expenses": return <Expenses />;
       default: return <Dashboard />;
     }
   };

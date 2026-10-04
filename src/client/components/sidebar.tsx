@@ -1,7 +1,7 @@
 import { AppNav, embedded } from "@clawnify/app/client";
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../context";
-import { Scissors, Menu, LayoutDashboard, CalendarDays, Clock, Users, UserCog, Sparkles, Package, CreditCard } from "lucide-preact";
+import { Scissors, Menu, LayoutDashboard, CalendarDays, Clock, Users, UserCog, Sparkles, Package, CreditCard, ReceiptText } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ const navItems: { view: View; path: string; label: string; icon: typeof LayoutDa
   { view: "services", path: "/services", label: "Services", icon: Sparkles },
   { view: "products", path: "/products", label: "Products", icon: Package },
   { view: "pos", path: "/pos", label: "Billing & POS", icon: CreditCard },
+  { view: "expenses", path: "/expenses", label: "Reports & Expenses", icon: ReceiptText },
 ];
 
 function SidebarContent({ currentView, onNavigate }: { currentView: View; onNavigate?: () => void }) {
@@ -92,7 +93,7 @@ export function Sidebar({ currentView }: { currentView: View }) {
   }, []);
 
   if (embedded) {
-    const icons = ["home", "calendar-days", "clock", "users", "users", "sparkles", "package", "credit-card"];
+    const icons = ["home", "calendar-days", "clock", "users", "users", "sparkles", "package", "credit-card", "receipt"];
     return <AppNav title="Salon" icon="calendar-days" active={currentView}
       groups={[{ items: navItems.map((item, index) => ({
         id: item.view, label: item.label, href: item.path, icon: icons[index],

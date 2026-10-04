@@ -1,4 +1,4 @@
-export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos";
+export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses";
 
 export interface User {
   id: number;
@@ -165,4 +165,14 @@ export interface Invoice {
   created_at: string;
   updated_at: string;
   items?: InvoiceItem[];
+}
+
+export interface Expense {
+  id: number;
+  category: string;
+  amount: number;
+  description: string | null;
+  expense_date: string;
+  created_at: string;
+  updated_at: string;
 }

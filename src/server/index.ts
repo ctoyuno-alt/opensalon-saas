@@ -64,6 +64,16 @@ const ConflictSchema = z.object({
   })),
 }).openapi("Conflict");
 
+const ExpenseSchema = z.object({
+  id: z.number().int(),
+  category: z.string(),
+  amount: z.number(),
+  description: z.string().nullable(),
+  expense_date: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).openapi("Expense");
+
 const InvoiceItemSchema = z.object({
   id: z.number().int().optional(),
   invoice_id: z.number().int().optional(),
@@ -343,6 +353,86 @@ const logout = createRoute({
 
 app.openapi(logout, async (c) => {
   // Stateless JWT, client handles deletion
+  return c.json({ ok: true }, 200);
+});
+
+// ── Expenses ───────────────────────────────────────────────────────
+
+const listExpenses = createRoute({
+  method: "get",
+  path: "/api/expenses",
+  responses: {
+    200: {
+      description: "List expenses",
+      content: { "application/json": { schema: z.object({ expenses: z.array(ExpenseSchema), total: z.number().int() }) } },
+    },
+  },
+});
+
+app.openapi(listExpenses, async (c) => {
+  const page = parseInt(c.req.query("page") || "1", 10);
+  const limit = parseInt(c.req.query("limit") || "50", 10);
+  const offset = (page - 1) * limit;
+
+  let q = "SELECT * FROM expenses";
+  let countQ = "SELECT COUNT(*) as total FROM expenses";
+  let params: any[] = [];
+
+  q += " ORDER BY expense_date DESC LIMIT ? OFFSET ?";
+  params.push(limit, offset);
+
+  const [expenses, total] = await Promise.all([
+    query<any>(q, params),
+    get<{total: number}>(countQ, [])
+  ]);
+
+  return c.json({ expenses, total: total?.total || 0 }, 200);
+});
+
+const createExpense = createRoute({
+  method: "post",
+  path: "/api/expenses",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: ExpenseSchema.omit({ id: true, created_at: true, updated_at: true }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Created expense", content: { "application/json": { schema: z.object({ expense: ExpenseSchema }) } } },
+    400: { description: "Bad Request" },
+  },
+});
+
+app.openapi(createExpense, async (c) => {
+  const body = await c.req.valid("json");
+  await run(
+    "INSERT INTO expenses (category, amount, description, expense_date) VALUES (?, ?, ?, ?)",
+    [body.category, body.amount, body.description, body.expense_date]
+  );
+  
+  const newExpense = await get<any>("SELECT * FROM expenses ORDER BY id DESC LIMIT 1");
+  return c.json({ expense: newExpense }, 200);
+});
+
+const deleteExpense = createRoute({
+  method: "delete",
+  path: "/api/expenses/{id}",
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: { description: "Deleted" },
+    404: { description: "Not Found" },
+  },
+});
+
+app.openapi(deleteExpense, async (c) => {
+  const { id } = c.req.valid("param");
+  const row = await get<any>("SELECT id FROM expenses WHERE id = ?", [id]);
+  if (!row) return c.text("Not Found", 404);
+  await run("DELETE FROM expenses WHERE id = ?", [id]);
   return c.json({ ok: true }, 200);
 });
 
