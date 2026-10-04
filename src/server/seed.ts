@@ -73,6 +73,8 @@ export async function ensureSeeded(): Promise<void> {
   try {
     await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('appointment_counter', '0')");
     await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('appointment_prefix', 'APT')");
+    await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('invoice_counter', '0')");
+    await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('invoice_prefix', 'INV')");
     await seedIfEmpty("staff", ["id", "name", "email", "title", "color"], STAFF);
     await seedIfEmpty("services", ["id", "name", "description", "duration", "price", "color", "category"], SERVICES);
     await seedIfEmpty("clients", ["id", "name", "email", "phone"], CLIENTS);

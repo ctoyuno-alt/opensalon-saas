@@ -64,6 +64,33 @@ const ConflictSchema = z.object({
   })),
 }).openapi("Conflict");
 
+const InvoiceItemSchema = z.object({
+  id: z.number().int().optional(),
+  invoice_id: z.number().int().optional(),
+  item_type: z.string(),
+  item_id: z.number().int().nullable(),
+  name: z.string(),
+  quantity: z.number().int(),
+  price: z.number(),
+  total: z.number(),
+}).openapi("InvoiceItem");
+
+const InvoiceSchema = z.object({
+  id: z.number().int(),
+  identifier: z.string(),
+  appointment_id: z.number().int().nullable(),
+  client_id: z.number().int(),
+  subtotal: z.number(),
+  discount: z.number(),
+  tax: z.number(),
+  total: z.number(),
+  payment_method: z.string(),
+  status: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  items: z.array(InvoiceItemSchema).optional(),
+}).openapi("Invoice");
+
 const ClientSchema = z.object({
   id: z.number().int(),
   name: z.string(),
@@ -189,6 +216,17 @@ async function nextIdentifier(): Promise<string> {
   return `${prefix?.value || "APT"}-${next}`;
 }
 
+async function nextInvoiceIdentifier(): Promise<string> {
+  const prefix = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'invoice_prefix'");
+  const counter = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'invoice_counter'");
+  const next = parseInt(counter?.value || "0", 10) + 1;
+  await run(
+    "INSERT INTO _meta (key, value) VALUES ('invoice_counter', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    [String(next)],
+  );
+  return `${prefix?.value || "INV"}-${next}`;
+}
+
 function addMinutes(time: string, minutes: number): string {
   const [h, m] = time.split(":").map(Number);
   const total = h * 60 + m + minutes;
@@ -305,6 +343,153 @@ const logout = createRoute({
 
 app.openapi(logout, async (c) => {
   // Stateless JWT, client handles deletion
+  return c.json({ ok: true }, 200);
+});
+
+// ── Invoices ───────────────────────────────────────────────────────
+
+const listInvoices = createRoute({
+  method: "get",
+  path: "/api/invoices",
+  responses: {
+    200: {
+      description: "List invoices",
+      content: { "application/json": { schema: z.object({ invoices: z.array(InvoiceSchema), total: z.number().int() }) } },
+    },
+  },
+});
+
+app.openapi(listInvoices, async (c) => {
+  const page = parseInt(c.req.query("page") || "1", 10);
+  const limit = parseInt(c.req.query("limit") || "50", 10);
+  const offset = (page - 1) * limit;
+  const status = c.req.query("status");
+  
+  let q = "SELECT * FROM invoices";
+  let countQ = "SELECT COUNT(*) as total FROM invoices";
+  const params: string[] = [];
+  
+  if (status) {
+    q += " WHERE status = ?";
+    countQ += " WHERE status = ?";
+    params.push(status);
+  }
+  
+  q += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+  
+  const [invoices, total] = await Promise.all([
+    query<any>(q, [...params, String(limit), String(offset)]),
+    get<{ total: number }>(countQ, params),
+  ]);
+  
+  return c.json({ invoices, total: total?.total || 0 }, 200);
+});
+
+const getInvoice = createRoute({
+  method: "get",
+  path: "/api/invoices/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Invoice details", content: { "application/json": { schema: z.object({ invoice: InvoiceSchema }) } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(getInvoice, async (c) => {
+  const id = c.req.valid("param").id;
+  const invoice = await get<any>("SELECT * FROM invoices WHERE id = ?", [id]);
+  if (!invoice) return c.json({ error: "Invoice not found" }, 404);
+  
+  const items = await query<any>("SELECT * FROM invoice_items WHERE invoice_id = ?", [id]);
+  return c.json({ invoice: { ...invoice, items } }, 200);
+});
+
+const createInvoice = createRoute({
+  method: "post",
+  path: "/api/invoices",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: InvoiceSchema.omit({ id: true, identifier: true, created_at: true, updated_at: true }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Created invoice", content: { "application/json": { schema: z.object({ invoice: InvoiceSchema }) } } },
+  },
+});
+
+app.openapi(createInvoice, async (c) => {
+  const data = c.req.valid("json");
+  const identifier = await nextInvoiceIdentifier();
+  
+  // Basic calculation check (frontend should send correct totals, but just trusting for MVP)
+  const result = await run(
+    `INSERT INTO invoices (identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [
+      identifier,
+      data.appointment_id ? String(data.appointment_id) : null,
+      String(data.client_id),
+      String(data.subtotal),
+      String(data.discount),
+      String(data.tax),
+      String(data.total),
+      data.payment_method,
+      data.status,
+    ]
+  );
+  
+  const invoiceId = result.lastInsertRowid!;
+  
+  if (data.items && data.items.length > 0) {
+    const placeholders = data.items.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const itemParams = data.items.flatMap(item => [
+      String(invoiceId),
+      item.item_type,
+      item.item_id ? String(item.item_id) : null,
+      item.name,
+      String(item.quantity),
+      String(item.price),
+      String(item.total),
+    ]);
+    
+    await run(
+      `INSERT INTO invoice_items (invoice_id, item_type, item_id, name, quantity, price, total) VALUES ${placeholders}`,
+      itemParams
+    );
+  }
+  
+  const newInvoice = await get<any>("SELECT * FROM invoices WHERE id = ?", [String(invoiceId)]);
+  const newItems = await query<any>("SELECT * FROM invoice_items WHERE invoice_id = ?", [String(invoiceId)]);
+  
+  return c.json({ invoice: { ...newInvoice, items: newItems } }, 200);
+});
+
+const updateInvoiceStatus = createRoute({
+  method: "put",
+  path: "/api/invoices/{id}/status",
+  request: {
+    params: IdParam,
+    body: { content: { "application/json": { schema: z.object({ status: z.string(), payment_method: z.string().optional() }) } } },
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
+  },
+});
+
+app.openapi(updateInvoiceStatus, async (c) => {
+  const id = c.req.valid("param").id;
+  const { status, payment_method } = c.req.valid("json");
+  
+  if (payment_method) {
+    await run("UPDATE invoices SET status = ?, payment_method = ?, updated_at = datetime('now') WHERE id = ?", [status, payment_method, id]);
+  } else {
+    await run("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
+  }
+  
   return c.json({ ok: true }, 200);
 });
 

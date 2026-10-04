@@ -106,6 +106,34 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Invoices / POS Billing
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  identifier TEXT NOT NULL UNIQUE,
+  appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  subtotal REAL NOT NULL DEFAULT 0,
+  discount REAL NOT NULL DEFAULT 0,
+  tax REAL NOT NULL DEFAULT 0,
+  total REAL NOT NULL DEFAULT 0,
+  payment_method TEXT DEFAULT 'cash', -- 'cash', 'card', 'upi'
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'paid', 'cancelled'
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Invoice Line Items (services + products)
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  item_type TEXT NOT NULL, -- 'service' or 'product'
+  item_id INTEGER, -- service_id or product_id
+  name TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  price REAL NOT NULL DEFAULT 0,
+  total REAL NOT NULL DEFAULT 0
+);
+
 -- Auto-incrementing identifier counter
 CREATE TABLE IF NOT EXISTS _meta (
   key TEXT PRIMARY KEY,
@@ -127,3 +155,5 @@ CREATE INDEX IF NOT EXISTS idx_blocked_slots_date ON blocked_slots(blocked_date)
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_services_category ON services(category);
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);

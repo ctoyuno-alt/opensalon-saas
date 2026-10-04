@@ -9884,6 +9884,8 @@ async function ensureSeeded() {
   try {
     await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('appointment_counter', '0')");
     await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('appointment_prefix', 'APT')");
+    await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('invoice_counter', '0')");
+    await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('invoice_prefix', 'INV')");
     await seedIfEmpty("staff", ["id", "name", "email", "title", "color"], STAFF);
     await seedIfEmpty("services", ["id", "name", "description", "duration", "price", "color", "category"], SERVICES);
     await seedIfEmpty("clients", ["id", "name", "email", "phone"], CLIENTS);
@@ -9937,6 +9939,31 @@ var ConflictSchema = external_exports.object({
     label: external_exports.string()
   }))
 }).openapi("Conflict");
+var InvoiceItemSchema = external_exports.object({
+  id: external_exports.number().int().optional(),
+  invoice_id: external_exports.number().int().optional(),
+  item_type: external_exports.string(),
+  item_id: external_exports.number().int().nullable(),
+  name: external_exports.string(),
+  quantity: external_exports.number().int(),
+  price: external_exports.number(),
+  total: external_exports.number()
+}).openapi("InvoiceItem");
+var InvoiceSchema = external_exports.object({
+  id: external_exports.number().int(),
+  identifier: external_exports.string(),
+  appointment_id: external_exports.number().int().nullable(),
+  client_id: external_exports.number().int(),
+  subtotal: external_exports.number(),
+  discount: external_exports.number(),
+  tax: external_exports.number(),
+  total: external_exports.number(),
+  payment_method: external_exports.string(),
+  status: external_exports.string(),
+  created_at: external_exports.string(),
+  updated_at: external_exports.string(),
+  items: external_exports.array(InvoiceItemSchema).optional()
+}).openapi("Invoice");
 var ClientSchema = external_exports.object({
   id: external_exports.number().int(),
   name: external_exports.string(),
@@ -10049,6 +10076,17 @@ async function nextIdentifier() {
   return `${prefix?.value || "APT"}-${next}`;
 }
 __name(nextIdentifier, "nextIdentifier");
+async function nextInvoiceIdentifier() {
+  const prefix = await get("SELECT value FROM _meta WHERE key = 'invoice_prefix'");
+  const counter = await get("SELECT value FROM _meta WHERE key = 'invoice_counter'");
+  const next = parseInt(counter?.value || "0", 10) + 1;
+  await run(
+    "INSERT INTO _meta (key, value) VALUES ('invoice_counter', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    [String(next)]
+  );
+  return `${prefix?.value || "INV"}-${next}`;
+}
+__name(nextInvoiceIdentifier, "nextInvoiceIdentifier");
 function addMinutes(time3, minutes) {
   const [h, m] = time3.split(":").map(Number);
   const total = h * 60 + m + minutes;
@@ -10152,6 +10190,128 @@ var logout = createRoute({
   responses: { 200: { description: "Logged out", content: { "application/json": { schema: OkSchema } } } }
 });
 app.openapi(logout, async (c) => {
+  return c.json({ ok: true }, 200);
+});
+var listInvoices = createRoute({
+  method: "get",
+  path: "/api/invoices",
+  responses: {
+    200: {
+      description: "List invoices",
+      content: { "application/json": { schema: external_exports.object({ invoices: external_exports.array(InvoiceSchema), total: external_exports.number().int() }) } }
+    }
+  }
+});
+app.openapi(listInvoices, async (c) => {
+  const page = parseInt(c.req.query("page") || "1", 10);
+  const limit = parseInt(c.req.query("limit") || "50", 10);
+  const offset = (page - 1) * limit;
+  const status = c.req.query("status");
+  let q = "SELECT * FROM invoices";
+  let countQ = "SELECT COUNT(*) as total FROM invoices";
+  const params = [];
+  if (status) {
+    q += " WHERE status = ?";
+    countQ += " WHERE status = ?";
+    params.push(status);
+  }
+  q += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+  const [invoices, total] = await Promise.all([
+    query(q, [...params, String(limit), String(offset)]),
+    get(countQ, params)
+  ]);
+  return c.json({ invoices, total: total?.total || 0 }, 200);
+});
+var getInvoice = createRoute({
+  method: "get",
+  path: "/api/invoices/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Invoice details", content: { "application/json": { schema: external_exports.object({ invoice: InvoiceSchema }) } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } }
+  }
+});
+app.openapi(getInvoice, async (c) => {
+  const id = c.req.valid("param").id;
+  const invoice = await get("SELECT * FROM invoices WHERE id = ?", [id]);
+  if (!invoice) return c.json({ error: "Invoice not found" }, 404);
+  const items = await query("SELECT * FROM invoice_items WHERE invoice_id = ?", [id]);
+  return c.json({ invoice: { ...invoice, items } }, 200);
+});
+var createInvoice = createRoute({
+  method: "post",
+  path: "/api/invoices",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: InvoiceSchema.omit({ id: true, identifier: true, created_at: true, updated_at: true })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Created invoice", content: { "application/json": { schema: external_exports.object({ invoice: InvoiceSchema }) } } }
+  }
+});
+app.openapi(createInvoice, async (c) => {
+  const data = c.req.valid("json");
+  const identifier = await nextInvoiceIdentifier();
+  const result = await run(
+    `INSERT INTO invoices (identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [
+      identifier,
+      data.appointment_id ? String(data.appointment_id) : null,
+      String(data.client_id),
+      String(data.subtotal),
+      String(data.discount),
+      String(data.tax),
+      String(data.total),
+      data.payment_method,
+      data.status
+    ]
+  );
+  const invoiceId = result.lastInsertRowid;
+  if (data.items && data.items.length > 0) {
+    const placeholders = data.items.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const itemParams = data.items.flatMap((item) => [
+      String(invoiceId),
+      item.item_type,
+      item.item_id ? String(item.item_id) : null,
+      item.name,
+      String(item.quantity),
+      String(item.price),
+      String(item.total)
+    ]);
+    await run(
+      `INSERT INTO invoice_items (invoice_id, item_type, item_id, name, quantity, price, total) VALUES ${placeholders}`,
+      itemParams
+    );
+  }
+  const newInvoice = await get("SELECT * FROM invoices WHERE id = ?", [String(invoiceId)]);
+  const newItems = await query("SELECT * FROM invoice_items WHERE invoice_id = ?", [String(invoiceId)]);
+  return c.json({ invoice: { ...newInvoice, items: newItems } }, 200);
+});
+var updateInvoiceStatus = createRoute({
+  method: "put",
+  path: "/api/invoices/{id}/status",
+  request: {
+    params: IdParam,
+    body: { content: { "application/json": { schema: external_exports.object({ status: external_exports.string(), payment_method: external_exports.string().optional() }) } } }
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: external_exports.object({ ok: external_exports.boolean() }) } } }
+  }
+});
+app.openapi(updateInvoiceStatus, async (c) => {
+  const id = c.req.valid("param").id;
+  const { status, payment_method } = c.req.valid("json");
+  if (payment_method) {
+    await run("UPDATE invoices SET status = ?, payment_method = ?, updated_at = datetime('now') WHERE id = ?", [status, payment_method, id]);
+  } else {
+    await run("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
+  }
   return c.json({ ok: true }, 200);
 });
 var getStats = createRoute({

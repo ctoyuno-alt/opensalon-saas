@@ -1,4 +1,4 @@
-export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products";
+export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos";
 
 export interface User {
   id: number;
@@ -138,4 +138,31 @@ export interface StaffLookup {
   id: number;
   name: string;
   color: string;
+}
+
+export interface InvoiceItem {
+  id?: number;
+  invoice_id?: number;
+  item_type: "service" | "product";
+  item_id: number | null;
+  name: string;
+  quantity: number;
+  price: number;
+  total: number;
+}
+
+export interface Invoice {
+  id: number;
+  identifier: string;
+  appointment_id: number | null;
+  client_id: number;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  payment_method: string;
+  status: "pending" | "paid" | "cancelled";
+  created_at: string;
+  updated_at: string;
+  items?: InvoiceItem[];
 }
