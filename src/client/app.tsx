@@ -17,6 +17,7 @@ import { PosBilling } from "./components/pos";
 import { Expenses } from "./components/expenses";
 import { ErrorBanner } from "./components/error-banner";
 import { Login } from "./components/login";
+import { PublicBooking } from "./public-booking";
 
 export function App() {
   const isAgent = useMemo(() => {
@@ -33,6 +34,10 @@ export function App() {
   const { view, id, navigate } = useRouter();
   const appState = useAppState(isAgent, navigate);
   useEffect(() => { reportLocation(window.location.pathname + window.location.search); }, [view, id]);
+
+  if (window.location.pathname.startsWith("/book")) {
+    return <PublicBooking />;
+  }
 
   useEffect(() => {
     if (view === "appointments" && id) {

@@ -27,7 +27,7 @@ const JWT_SECRET = "super-secret-key-for-opensalon-mvp"; // Use env var in produ
 
 // Auth Middleware
 app.use("/api/*", async (c, next) => {
-  if (c.req.path.startsWith("/api/auth/")) return next();
+  if (c.req.path.startsWith("/api/auth/") || c.req.path.startsWith("/api/public/")) return next();
   
   const authHeader = c.req.header("Authorization");
   const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
@@ -1557,6 +1557,152 @@ app.openapi(deleteProduct, async (c) => {
   const { id } = c.req.valid("param");
   await run("DELETE FROM products WHERE id = ?", [id]);
   return c.json({ ok: true }, 200);
+});
+
+// ── Public Booking ──────────────────────────────────────────────────
+
+const publicServices = createRoute({
+  method: "get",
+  path: "/api/public/services",
+  responses: {
+    200: { description: "Public Services", content: { "application/json": { schema: z.object({ services: z.array(ServiceSchema) }) } } },
+  },
+});
+
+app.openapi(publicServices, async (c) => {
+  const services = await query<any>("SELECT * FROM services ORDER BY category, name");
+  return c.json({ services }, 200);
+});
+
+const publicAvailability = createRoute({
+  method: "get",
+  path: "/api/public/availability",
+  request: {
+    query: z.object({ date: z.string(), service_id: z.string(), staff_id: z.string().optional() })
+  },
+  responses: {
+    200: { description: "Available Slots", content: { "application/json": { schema: z.object({ slots: z.array(z.string()) }) } } },
+  },
+});
+
+app.openapi(publicAvailability, async (c) => {
+  const { date, service_id, staff_id } = c.req.valid("query");
+  const service = await get<any>("SELECT duration FROM services WHERE id = ?", [service_id]);
+  if (!service) return c.json({ slots: [] }, 200);
+  
+  const duration = service.duration;
+  let appointmentsQuery = `SELECT a.start_time, a.end_time, 'Appointment' as label FROM appointments a WHERE a.scheduled_date = ? AND a.status != 'cancelled'`;
+  let blockedQuery = `SELECT start_time, end_time, reason as label FROM blocked_slots WHERE blocked_date = ?`;
+  let params: any[] = [date];
+  
+  if (staff_id) {
+    appointmentsQuery += ` AND a.staff_id = ?`;
+    blockedQuery += ` AND staff_id = ?`;
+    params.push(staff_id);
+  }
+  
+  // Combine all busy blocks
+  const [apts, blocks] = await Promise.all([
+    query<any>(appointmentsQuery, params),
+    query<any>(blockedQuery, params)
+  ]);
+  
+  const busy: Busy[] = [
+    ...apts.map((a: any) => ({ kind: "appointment", start_time: a.start_time, end_time: a.end_time, label: a.label })),
+    ...blocks.map((b: any) => ({ kind: "blocked", start_time: b.start_time, end_time: b.end_time, label: b.label }))
+  ];
+  
+  const slots: string[] = [];
+  // Standard hours: 09:00 to 18:00
+  for (let h = 9; h < 18; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      const startMinutes = h * 60 + m;
+      const endMinutes = startMinutes + duration;
+      if (endMinutes > 18 * 60) continue; // Don't extend past closing
+      
+      const start_time = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+      const eh = Math.floor(endMinutes / 60);
+      const em = endMinutes % 60;
+      const end_time = `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`;
+      
+      const conflicts = findConflicts(start_time, end_time, busy);
+      if (conflicts.length === 0) {
+        slots.push(start_time);
+      }
+    }
+  }
+  
+  return c.json({ slots }, 200);
+});
+
+const publicBook = createRoute({
+  method: "post",
+  path: "/api/public/book",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            name: z.string(),
+            email: z.string().email(),
+            phone: z.string(),
+            service_id: z.number().int(),
+            date: z.string(),
+            time: z.string(),
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Booked", content: { "application/json": { schema: z.object({ ok: z.boolean(), appointment_id: z.number().int().optional() }) } } },
+    400: { description: "Conflict" }
+  },
+});
+
+app.openapi(publicBook, async (c) => {
+  const body = await c.req.valid("json");
+  
+  // 1. Get or Create Client
+  let client = await get<any>("SELECT id FROM clients WHERE email = ? OR phone = ?", [body.email, body.phone]);
+  let client_id = client?.id;
+  if (!client_id) {
+    await run("INSERT INTO clients (name, email, phone) VALUES (?, ?, ?)", [body.name, body.email, body.phone]);
+    client = await get<any>("SELECT id FROM clients ORDER BY id DESC LIMIT 1");
+    client_id = client.id;
+  }
+  
+  // 2. Validate availability again just to be safe
+  const service = await get<any>("SELECT duration, price, name FROM services WHERE id = ?", [body.service_id]);
+  if (!service) return c.json({ ok: false }, 400);
+  
+  const startMinutes = toMinutes(body.time);
+  if (startMinutes === null) return c.json({ ok: false }, 400);
+  
+  const endMinutes = startMinutes + service.duration;
+  const eh = Math.floor(endMinutes / 60);
+  const em = endMinutes % 60;
+  const end_time = `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`;
+  
+  // Get any staff member (for simplicity in MVP, we just assign staff_id = 1, or leave it null if unassigned)
+  const staff = await get<any>("SELECT id FROM staff LIMIT 1");
+  const staff_id = staff?.id || null;
+  
+  const identifier = await nextIdentifier();
+  
+  await run(
+    "INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [identifier, client_id, staff_id, body.date, body.time, end_time, "booked"]
+  );
+  
+  const apt = await get<any>("SELECT id FROM appointments ORDER BY id DESC LIMIT 1");
+  
+  await run(
+    "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
+    [apt.id, body.service_id, service.price, service.duration]
+  );
+  
+  return c.json({ ok: true, appointment_id: apt.id }, 200);
 });
 
 export default app;

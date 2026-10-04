@@ -9910,7 +9910,7 @@ app.use("*", async (_c, next) => {
 });
 var JWT_SECRET = "super-secret-key-for-opensalon-mvp";
 app.use("/api/*", async (c, next) => {
-  if (c.req.path.startsWith("/api/auth/")) return next();
+  if (c.req.path.startsWith("/api/auth/") || c.req.path.startsWith("/api/public/")) return next();
   const authHeader = c.req.header("Authorization");
   const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
   if (!token) return c.json({ error: "Unauthorized" }, 401);
@@ -11282,6 +11282,121 @@ app.openapi(deleteProduct, async (c) => {
   const { id } = c.req.valid("param");
   await run("DELETE FROM products WHERE id = ?", [id]);
   return c.json({ ok: true }, 200);
+});
+var publicServices = createRoute({
+  method: "get",
+  path: "/api/public/services",
+  responses: {
+    200: { description: "Public Services", content: { "application/json": { schema: external_exports.object({ services: external_exports.array(ServiceSchema) }) } } }
+  }
+});
+app.openapi(publicServices, async (c) => {
+  const services = await query("SELECT * FROM services ORDER BY category, name");
+  return c.json({ services }, 200);
+});
+var publicAvailability = createRoute({
+  method: "get",
+  path: "/api/public/availability",
+  request: {
+    query: external_exports.object({ date: external_exports.string(), service_id: external_exports.string(), staff_id: external_exports.string().optional() })
+  },
+  responses: {
+    200: { description: "Available Slots", content: { "application/json": { schema: external_exports.object({ slots: external_exports.array(external_exports.string()) }) } } }
+  }
+});
+app.openapi(publicAvailability, async (c) => {
+  const { date, service_id, staff_id } = c.req.valid("query");
+  const service = await get("SELECT duration FROM services WHERE id = ?", [service_id]);
+  if (!service) return c.json({ slots: [] }, 200);
+  const duration = service.duration;
+  let appointmentsQuery = `SELECT a.start_time, a.end_time, 'Appointment' as label FROM appointments a WHERE a.scheduled_date = ? AND a.status != 'cancelled'`;
+  let blockedQuery = `SELECT start_time, end_time, reason as label FROM blocked_slots WHERE blocked_date = ?`;
+  let params = [date];
+  if (staff_id) {
+    appointmentsQuery += ` AND a.staff_id = ?`;
+    blockedQuery += ` AND staff_id = ?`;
+    params.push(staff_id);
+  }
+  const [apts, blocks] = await Promise.all([
+    query(appointmentsQuery, params),
+    query(blockedQuery, params)
+  ]);
+  const busy = [
+    ...apts.map((a) => ({ kind: "appointment", start_time: a.start_time, end_time: a.end_time, label: a.label })),
+    ...blocks.map((b) => ({ kind: "blocked", start_time: b.start_time, end_time: b.end_time, label: b.label }))
+  ];
+  const slots = [];
+  for (let h = 9; h < 18; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      const startMinutes = h * 60 + m;
+      const endMinutes = startMinutes + duration;
+      if (endMinutes > 18 * 60) continue;
+      const start_time = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+      const eh = Math.floor(endMinutes / 60);
+      const em = endMinutes % 60;
+      const end_time = `${eh.toString().padStart(2, "0")}:${em.toString().padStart(2, "0")}`;
+      const conflicts = findConflicts(start_time, end_time, busy);
+      if (conflicts.length === 0) {
+        slots.push(start_time);
+      }
+    }
+  }
+  return c.json({ slots }, 200);
+});
+var publicBook = createRoute({
+  method: "post",
+  path: "/api/public/book",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            name: external_exports.string(),
+            email: external_exports.string().email(),
+            phone: external_exports.string(),
+            service_id: external_exports.number().int(),
+            date: external_exports.string(),
+            time: external_exports.string()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Booked", content: { "application/json": { schema: external_exports.object({ ok: external_exports.boolean(), appointment_id: external_exports.number().int().optional() }) } } },
+    400: { description: "Conflict" }
+  }
+});
+app.openapi(publicBook, async (c) => {
+  const body = await c.req.valid("json");
+  let client = await get("SELECT id FROM clients WHERE email = ? OR phone = ?", [body.email, body.phone]);
+  let client_id = client?.id;
+  if (!client_id) {
+    await run("INSERT INTO clients (name, email, phone) VALUES (?, ?, ?)", [body.name, body.email, body.phone]);
+    client = await get("SELECT id FROM clients ORDER BY id DESC LIMIT 1");
+    client_id = client.id;
+  }
+  const service = await get("SELECT duration, price, name FROM services WHERE id = ?", [body.service_id]);
+  if (!service) return c.json({ ok: false }, 400);
+  const startMinutes = toMinutes(body.time);
+  if (startMinutes === null) return c.json({ ok: false }, 400);
+  const endMinutes = startMinutes + service.duration;
+  const eh = Math.floor(endMinutes / 60);
+  const em = endMinutes % 60;
+  const end_time = `${eh.toString().padStart(2, "0")}:${em.toString().padStart(2, "0")}`;
+  const staff = await get("SELECT id FROM staff LIMIT 1");
+  const staff_id = staff?.id || null;
+  const identifier = await nextIdentifier();
+  await run(
+    "INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [identifier, client_id, staff_id, body.date, body.time, end_time, "booked"]
+  );
+  const apt = await get("SELECT id FROM appointments ORDER BY id DESC LIMIT 1");
+  await run(
+    "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
+    [apt.id, body.service_id, service.price, service.duration]
+  );
+  return c.json({ ok: true, appointment_id: apt.id }, 200);
 });
 var server_default = app;
 
