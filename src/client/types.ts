@@ -1,5 +1,12 @@
 export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products";
 
+export interface User {
+  id: number;
+  username: string;
+  role: string;
+  staff_id: number | null;
+}
+
 export type AppointmentStatus = "booked" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show";
 
 export interface Appointment {

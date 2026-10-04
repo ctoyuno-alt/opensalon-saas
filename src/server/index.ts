@@ -1,9 +1,13 @@
 import { createApp, createRoute, z } from "@clawnify/app";
+import { sign, verify } from "hono/jwt";
 import { query, get, run } from "./db.js";
 import { findConflicts, describeConflicts, toMinutes, type Busy } from "./scheduling.js";
 import { ensureSeeded } from "./seed.js";
 
-type Env = { Bindings: { DB: D1Database } };
+type Env = { 
+  Bindings: { DB: D1Database };
+  Variables: { user: { id: number; username: string; role: string; staff_id: number | null } };
+};
 
 const app = createApp<Env>({
   title: "OpenSalon",
@@ -19,10 +23,36 @@ app.use("*", async (_c, next) => {
   await next();
 });
 
+const JWT_SECRET = "super-secret-key-for-opensalon-mvp"; // Use env var in production
+
+// Auth Middleware
+app.use("/api/*", async (c, next) => {
+  if (c.req.path.startsWith("/api/auth/")) return next();
+  
+  const authHeader = c.req.header("Authorization");
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+  if (!token) return c.json({ error: "Unauthorized" }, 401);
+  
+  try {
+    const decoded = await verify(token, JWT_SECRET, "HS256");
+    c.set("user", decoded as Env["Variables"]["user"]);
+    return next();
+  } catch {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+});
+
 // ── Shared Schemas ─────────────────────────────────────────────────
 
 const ErrorSchema = z.object({ error: z.string() }).openapi("Error");
 const OkSchema = z.object({ ok: z.boolean() }).openapi("Ok");
+
+const UserSchema = z.object({
+  id: z.number().int(),
+  username: z.string(),
+  role: z.string(),
+  staff_id: z.number().int().nullable(),
+}).openapi("User");
 
 const ConflictSchema = z.object({
   error: z.string(),
@@ -139,6 +169,13 @@ const IdParam = z.object({ id: z.string().openapi({ description: "Resource ID" }
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+async function hashPassword(password: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function nextIdentifier(): Promise<string> {
   const prefix = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'appointment_prefix'");
   const counter = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'appointment_counter'");
@@ -198,6 +235,78 @@ async function staffName(staffId: number): Promise<string> {
   const s = await get<{ name: string }>("SELECT name FROM staff WHERE id = ?", [staffId]);
   return s?.name || "";
 }
+
+// ── Auth ───────────────────────────────────────────────────────────
+
+const login = createRoute({
+  method: "post",
+  path: "/api/auth/login",
+  request: {
+    body: { content: { "application/json": { schema: z.object({ username: z.string(), password: z.string() }) } } },
+  },
+  responses: {
+    200: { description: "Logged in", content: { "application/json": { schema: z.object({ user: UserSchema, token: z.string() }) } } },
+    401: { description: "Invalid credentials", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(login, async (c) => {
+  const { username, password } = c.req.valid("json");
+  const hashed = await hashPassword(password);
+  const user = await get<{ id: number; username: string; role: string; staff_id: number | null; password_hash: string }>(
+    "SELECT * FROM users WHERE username = ?", [username]
+  );
+  if (!user || user.password_hash !== hashed) {
+    return c.json({ error: "Invalid username or password" }, 401);
+  }
+  
+  const payload = { 
+    id: user.id, 
+    username: user.username, 
+    role: user.role, 
+    staff_id: user.staff_id,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
+  };
+  const token = await sign(payload, JWT_SECRET);
+  
+  return c.json({ user: payload, token }, 200);
+});
+
+const getMe = createRoute({
+  method: "get",
+  path: "/api/auth/me",
+  responses: {
+    200: { description: "Current user", content: { "application/json": { schema: z.object({ user: UserSchema }) } } },
+    401: { description: "Not logged in", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(getMe, async (c) => {
+  const authHeader = c.req.header("Authorization");
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+  if (!token) {
+    console.log("No auth_token provided in getMe");
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  try {
+    const decoded = await verify(token, JWT_SECRET, "HS256");
+    return c.json({ user: decoded }, 200);
+  } catch (err) {
+    console.log("JWT Verify error:", err);
+    return c.json({ error: "Unauthorized", details: err instanceof Error ? err.message : String(err) }, 401);
+  }
+});
+
+const logout = createRoute({
+  method: "post",
+  path: "/api/auth/logout",
+  responses: { 200: { description: "Logged out", content: { "application/json": { schema: OkSchema } } } },
+});
+
+app.openapi(logout, async (c) => {
+  // Stateless JWT, client handles deletion
+  return c.json({ ok: true }, 200);
+});
 
 // ── Stats ──────────────────────────────────────────────────────────
 

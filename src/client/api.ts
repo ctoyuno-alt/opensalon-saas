@@ -8,6 +8,10 @@ export class ApiError extends Error {
 
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = { method, headers: {} };
+  const token = localStorage.getItem("auth_token");
+  if (token) {
+    (opts.headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  }
   if (body) {
     (opts.headers as Record<string, string>)["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);

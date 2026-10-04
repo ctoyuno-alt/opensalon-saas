@@ -12,6 +12,7 @@ type StaffSeed = [id: number, name: string, email: string, title: string, color:
 type ServiceSeed = [id: number, name: string, description: string, duration: number, price: number, color: string, category: string];
 type ClientSeed = [id: number, name: string, email: string, phone: string];
 type ProductSeed = [id: number, name: string, brand: string, category: string, price: number, cost: number, stock: number];
+type UserSeed = [id: number, username: string, password_hash: string, role: string];
 
 const STAFF: StaffSeed[] = [
   [1, "Alex", "alex@example.com", "Senior Stylist", "#3b82f6"],
@@ -44,6 +45,11 @@ const PRODUCTS: ProductSeed[] = [
   [4, "Essential Oil Set", "AromaPlus", "Wellness", 45.99, 22.0, 12],
 ];
 
+// SHA-256 hash of "password" for the default admin user
+const USERS: UserSeed[] = [
+  [1, "admin", "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", "owner"],
+];
+
 let seeded = false;
 
 /** Insert `rows` into `table` only while it is still empty. */
@@ -71,6 +77,7 @@ export async function ensureSeeded(): Promise<void> {
     await seedIfEmpty("services", ["id", "name", "description", "duration", "price", "color", "category"], SERVICES);
     await seedIfEmpty("clients", ["id", "name", "email", "phone"], CLIENTS);
     await seedIfEmpty("products", ["id", "name", "brand", "category", "price", "cost", "stock"], PRODUCTS);
+    await seedIfEmpty("users", ["id", "username", "password_hash", "role"], USERS);
     seeded = true;
   } catch {
     // Sample data must never fail a request; retry on the next one.

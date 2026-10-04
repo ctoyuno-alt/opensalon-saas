@@ -14,6 +14,7 @@ import { StaffList } from "./components/staff-list";
 import { ServiceList } from "./components/service-list";
 import { ProductList } from "./components/product-list";
 import { ErrorBanner } from "./components/error-banner";
+import { Login } from "./components/login";
 
 export function App() {
   const isAgent = useMemo(() => {
@@ -56,10 +57,12 @@ export function App() {
   return (
     <AppContext.Provider value={appState}>
       <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
-        <Sidebar currentView={view} />
+        {appState.currentUser && <Sidebar currentView={view} />}
         <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-background">
           {appState.loading ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">Loading...</div>
+          ) : !appState.currentUser ? (
+            <Login />
           ) : (
             renderMain()
           )}

@@ -2,12 +2,13 @@ import { useState, useCallback, useEffect } from "preact/hooks";
 import { api } from "../api";
 import { today } from "../lib/dates";
 import type {
-  Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
+  User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup,
 } from "../types";
 import type { AppContextValue } from "../context";
 
 export function useAppState(isAgent: boolean, navigate: (to: string) => void): AppContextValue {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [stats, setStats] = useState<Stats>({ appointments: 0, clients: 0, staff: 0, services: 0, products: 0, today_appointments: 0, upcoming_appointments: 0, completed_appointments: 0, revenue: 0, low_stock_products: 0 });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,16 +109,20 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     (async () => {
       setLoading(true);
       try {
-        await Promise.all([
-          fetchStats(),
-          fetchAppointments(appointmentsPag, "", ""),
-          fetchCalendar(calendarDate),
-          fetchClients(clientsPag, ""),
-          fetchStaff(),
-          fetchServices(),
-          fetchProducts(productsPag, ""),
-          fetchLookups(),
-        ]);
+        const userRes = await api<{ user: User }>("GET", "/api/auth/me").catch(() => null);
+        if (userRes?.user) {
+          setCurrentUser(userRes.user);
+          await Promise.all([
+            fetchStats(),
+            fetchAppointments(appointmentsPag, "", ""),
+            fetchCalendar(calendarDate),
+            fetchClients(clientsPag, ""),
+            fetchStaff(),
+            fetchServices(),
+            fetchProducts(productsPag, ""),
+            fetchLookups(),
+          ]);
+        }
       } catch (err) {
         setError((err as Error).message);
       } finally {
@@ -127,20 +132,24 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter).catch((err) => setError((err as Error).message));
-  }, [appointmentsPag.page, appointmentsSearch, appointmentsStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser, appointmentsPag.page, appointmentsSearch, appointmentsStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchCalendar(calendarDate).catch((err) => setError((err as Error).message));
-  }, [calendarDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser, calendarDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchClients(clientsPag, clientsSearch).catch((err) => setError((err as Error).message));
-  }, [clientsPag.page, clientsSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser, clientsPag.page, clientsSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchProducts(productsPag, productsSearch).catch((err) => setError((err as Error).message));
-  }, [productsPag.page, productsSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser, productsPag.page, productsSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Appointments CRUD ──
 
@@ -314,7 +323,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, [productsPag, productsSearch, fetchProducts, fetchStats]);
 
   return {
-    navigate, isAgent, stats,
+    navigate, isAgent, currentUser, setCurrentUser, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
     appointmentsStatusFilter, setAppointmentsStatusFilter,
     addAppointment, updateAppointment, deleteAppointment,
@@ -327,6 +336,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     staffMembers, addStaff, updateStaff, deleteStaff,
     services, addService, updateService, deleteService,
     products, productsPag, setProductsPage, productsSearch, setProductsSearch,
+    addProduct, updateProduct, deleteProduct,
     addProduct, updateProduct, deleteProduct,
     clientLookup, staffLookup,
     loading, error, setError,

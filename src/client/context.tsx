@@ -1,13 +1,15 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type {
-  Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
+  User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup,
 } from "./types";
 
 export interface AppContextValue {
   navigate: (to: string) => void;
   isAgent: boolean;
+  currentUser: User | null;
+  setCurrentUser: (u: User | null) => void;
   stats: Stats;
 
   // Appointments
