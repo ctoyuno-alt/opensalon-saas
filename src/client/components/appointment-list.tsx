@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { useApp } from "../context";
-import { Plus, Search, Trash2 } from "lucide-preact";
+import { Plus, Search, Trash2, MessageCircle } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,7 +81,23 @@ export function AppointmentList() {
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-3 text-sm">
                     <span className="text-primary">{apt.identifier}</span>
-                    <span className="font-medium">${apt.total_price.toFixed(2)}</span>
+                    <div className="flex items-center gap-2">
+                      {apt.client_phone && (
+                        <a
+                          href={`https://wa.me/${apt.client_phone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(
+                            `Hi ${apt.client_name || ""}, regarding your appointment at OpenSalon on ${apt.scheduled_date} at ${apt.start_time}:`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`WhatsApp ${apt.client_name}`}
+                          className="flex h-6 w-6 items-center justify-center rounded text-emerald-600 hover:bg-emerald-50"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                        </a>
+                      )}
+                      <span className="font-medium">${apt.total_price.toFixed(2)}</span>
+                    </div>
                   </div>
                 </button>
                 <button
@@ -130,9 +146,25 @@ export function AppointmentList() {
                   <TableCell><StatusBadge status={apt.status} /></TableCell>
                   <TableCell className="text-right">${apt.total_price.toFixed(2)}</TableCell>
                   <TableCell>
-                    <Button aria-label={`Delete appointment ${apt.identifier}`} variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteAppointment(apt.id); }}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center justify-end gap-1">
+                      {apt.client_phone && (
+                        <a
+                          href={`https://wa.me/${apt.client_phone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(
+                            `Hi ${apt.client_name || ""}, regarding your appointment at OpenSalon on ${apt.scheduled_date} at ${apt.start_time}:`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`WhatsApp ${apt.client_name}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </a>
+                      )}
+                      <Button aria-label={`Delete appointment ${apt.identifier}`} variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); deleteAppointment(apt.id); }}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

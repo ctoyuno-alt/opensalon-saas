@@ -169,3 +169,43 @@ CREATE TABLE IF NOT EXISTS expenses (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+
+-- WhatsApp Settings & Configuration
+CREATE TABLE IF NOT EXISTS whatsapp_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  provider TEXT NOT NULL DEFAULT 'meta', -- 'meta', 'simulation'
+  phone_number_id TEXT DEFAULT '',
+  access_token TEXT DEFAULT '',
+  business_account_id TEXT DEFAULT '',
+  sender_phone_number TEXT DEFAULT '',
+  salon_name TEXT DEFAULT 'OpenSalon',
+  auto_send_booking_confirmation INTEGER NOT NULL DEFAULT 1,
+  auto_send_reschedule INTEGER NOT NULL DEFAULT 1,
+  auto_send_cancellation INTEGER NOT NULL DEFAULT 1,
+  auto_send_receipt INTEGER NOT NULL DEFAULT 1,
+  template_booking_confirmation TEXT DEFAULT 'Hi {{client_name}}, your appointment at {{salon_name}} for {{service_name}} on {{date}} at {{time}} with {{staff_name}} is confirmed! Total: ${{total}}. See you soon!',
+  template_reminder TEXT DEFAULT 'Friendly reminder from {{salon_name}}: You have an upcoming appointment for {{service_name}} on {{date}} at {{time}} with {{staff_name}}. Reply YES to confirm.',
+  template_reschedule TEXT DEFAULT 'Hi {{client_name}}, your appointment at {{salon_name}} has been rescheduled to {{date}} at {{time}} with {{staff_name}}.',
+  template_cancellation TEXT DEFAULT 'Hi {{client_name}}, your appointment at {{salon_name}} for {{date}} at {{time}} has been cancelled. Please reach out to reschedule!',
+  template_receipt TEXT DEFAULT 'Thank you for visiting {{salon_name}}, {{client_name}}! Here is your receipt for Invoice #{{invoice_id}}: Total paid ${{total}} via {{payment_method}}.',
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- WhatsApp Message Logs
+CREATE TABLE IF NOT EXISTS whatsapp_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipient_phone TEXT NOT NULL,
+  recipient_name TEXT DEFAULT '',
+  message_type TEXT NOT NULL, -- 'booking_confirmation', 'reminder', 'reschedule', 'cancellation', 'receipt', 'test', 'custom'
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent', -- 'sent', 'delivered', 'failed', 'simulated'
+  provider TEXT NOT NULL DEFAULT 'meta',
+  external_id TEXT DEFAULT '',
+  error_message TEXT DEFAULT '',
+  reference_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_logs_created ON whatsapp_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_logs_recipient ON whatsapp_logs(recipient_phone);
+

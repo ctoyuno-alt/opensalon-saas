@@ -15,6 +15,7 @@ import { ServiceList } from "./components/service-list";
 import { ProductList } from "./components/product-list";
 import { PosBilling } from "./components/pos";
 import { Expenses } from "./components/expenses";
+import { WhatsAppHub } from "./components/whatsapp-hub";
 import { ErrorBanner } from "./components/error-banner";
 import { Login } from "./components/login";
 import { PublicBooking } from "./public-booking";
@@ -59,6 +60,7 @@ export function App() {
       case "products": return <ProductList />;
       case "pos": return <PosBilling />;
       case "expenses": return <Expenses />;
+      case "whatsapp": return <WhatsAppHub />;
       default: return <Dashboard />;
     }
   };

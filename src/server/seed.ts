@@ -80,6 +80,7 @@ export async function ensureSeeded(): Promise<void> {
     await seedIfEmpty("clients", ["id", "name", "email", "phone"], CLIENTS);
     await seedIfEmpty("products", ["id", "name", "brand", "category", "price", "cost", "stock"], PRODUCTS);
     await seedIfEmpty("users", ["id", "username", "password_hash", "role"], USERS);
+    await run("INSERT OR IGNORE INTO whatsapp_settings (id, provider) VALUES (1, 'meta')");
     seeded = true;
   } catch {
     // Sample data must never fail a request; retry on the next one.

@@ -3,6 +3,15 @@ import { sign, verify } from "hono/jwt";
 import { query, get, run } from "./db.js";
 import { findConflicts, describeConflicts, toMinutes, type Busy } from "./scheduling.js";
 import { ensureSeeded } from "./seed.js";
+import {
+  getWhatsAppSettings,
+  updateWhatsAppSettings,
+  listWhatsAppLogs,
+  sendWhatsAppMessage,
+  sendAppointmentNotification,
+  sendInvoiceReceiptNotification,
+  createWaMeUrl,
+} from "./whatsapp.js";
 
 type Env = { 
   Bindings: { DB: D1Database };
@@ -201,6 +210,68 @@ const ProductSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 }).openapi("Product");
+
+const WhatsAppSettingsSchema = z.object({
+  id: z.number().int(),
+  provider: z.enum(["meta", "simulation"]),
+  phone_number_id: z.string(),
+  access_token: z.string(),
+  business_account_id: z.string(),
+  sender_phone_number: z.string(),
+  salon_name: z.string(),
+  auto_send_booking_confirmation: z.number().int(),
+  auto_send_reschedule: z.number().int(),
+  auto_send_cancellation: z.number().int(),
+  auto_send_receipt: z.number().int(),
+  template_booking_confirmation: z.string(),
+  template_reminder: z.string(),
+  template_reschedule: z.string(),
+  template_cancellation: z.string(),
+  template_receipt: z.string(),
+  updated_at: z.string().optional(),
+}).openapi("WhatsAppSettings");
+
+const UpdateWhatsAppSettingsSchema = z.object({
+  provider: z.enum(["meta", "simulation"]).optional(),
+  phone_number_id: z.string().optional(),
+  access_token: z.string().optional(),
+  business_account_id: z.string().optional(),
+  sender_phone_number: z.string().optional(),
+  salon_name: z.string().optional(),
+  auto_send_booking_confirmation: z.number().int().optional(),
+  auto_send_reschedule: z.number().int().optional(),
+  auto_send_cancellation: z.number().int().optional(),
+  auto_send_receipt: z.number().int().optional(),
+  template_booking_confirmation: z.string().optional(),
+  template_reminder: z.string().optional(),
+  template_reschedule: z.string().optional(),
+  template_cancellation: z.string().optional(),
+  template_receipt: z.string().optional(),
+}).openapi("UpdateWhatsAppSettings");
+
+const WhatsAppLogSchema = z.object({
+  id: z.number().int(),
+  recipient_phone: z.string(),
+  recipient_name: z.string(),
+  message_type: z.string(),
+  content: z.string(),
+  status: z.enum(["sent", "delivered", "failed", "simulated"]),
+  provider: z.string(),
+  external_id: z.string(),
+  error_message: z.string(),
+  reference_id: z.number().int().nullable(),
+  created_at: z.string(),
+}).openapi("WhatsAppLog");
+
+const WhatsAppSendResultSchema = z.object({
+  success: z.boolean(),
+  status: z.enum(["sent", "simulated", "failed"]),
+  messageId: z.string().optional(),
+  error: z.string().optional(),
+  waMeUrl: z.string(),
+  content: z.string(),
+  recipientPhone: z.string(),
+}).openapi("WhatsAppSendResult");
 
 const IdParam = z.object({ id: z.string().openapi({ description: "Resource ID" }) });
 
@@ -554,7 +625,16 @@ app.openapi(createInvoice, async (c) => {
   
   const newInvoice = await get<any>("SELECT * FROM invoices WHERE id = ?", [String(invoiceId)]);
   const newItems = await query<any>("SELECT * FROM invoice_items WHERE invoice_id = ?", [String(invoiceId)]);
-  
+
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (data.status === "paid" && waSettings.auto_send_receipt) {
+      await sendInvoiceReceiptNotification(Number(invoiceId));
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp receipt error:", err);
+  }
+
   return c.json({ invoice: { ...newInvoice, items: newItems } }, 200);
 });
 
@@ -579,7 +659,16 @@ app.openapi(updateInvoiceStatus, async (c) => {
   } else {
     await run("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
   }
-  
+
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (status === "paid" && waSettings.auto_send_receipt) {
+      await sendInvoiceReceiptNotification(Number(id));
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp receipt error on status update:", err);
+  }
+
   return c.json({ ok: true }, 200);
 });
 
@@ -883,6 +972,15 @@ app.openapi(createAppointment, async (c) => {
     [aptId],
   );
 
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (waSettings.auto_send_booking_confirmation) {
+      await sendAppointmentNotification(aptId, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp confirmation error:", err);
+  }
+
   return c.json({ appointment: apt }, 201);
 });
 
@@ -967,6 +1065,18 @@ app.openapi(updateAppointment, async (c) => {
   }
   sets.push("updated_at = datetime('now')");
   await run(`UPDATE appointments SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (body.status === "cancelled" && existing.status !== "cancelled" && waSettings.auto_send_cancellation) {
+      await sendAppointmentNotification(Number(id), "cancellation");
+    } else if (moved && status !== "cancelled" && waSettings.auto_send_reschedule) {
+      await sendAppointmentNotification(Number(id), "reschedule");
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp update error:", err);
+  }
+
   return c.json({ ok: true }, 200);
 });
 
@@ -1701,8 +1811,195 @@ app.openapi(publicBook, async (c) => {
     "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
     [apt.id, body.service_id, service.price, service.duration]
   );
+
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (waSettings.auto_send_booking_confirmation) {
+      await sendAppointmentNotification(apt.id, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp public booking confirmation error:", err);
+  }
   
   return c.json({ ok: true, appointment_id: apt.id }, 200);
 });
 
+// ── WhatsApp Endpoints ─────────────────────────────────────────────
+
+const getWhatsAppSettingsEndpoint = createRoute({
+  method: "get",
+  path: "/api/whatsapp/settings",
+  responses: {
+    200: {
+      description: "WhatsApp settings",
+      content: { "application/json": { schema: z.object({ settings: WhatsAppSettingsSchema }) } },
+    },
+  },
+});
+
+app.openapi(getWhatsAppSettingsEndpoint, async (c) => {
+  const settings = await getWhatsAppSettings();
+  return c.json({ settings }, 200);
+});
+
+const updateWhatsAppSettingsEndpoint = createRoute({
+  method: "put",
+  path: "/api/whatsapp/settings",
+  request: {
+    body: { content: { "application/json": { schema: UpdateWhatsAppSettingsSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Updated WhatsApp settings",
+      content: { "application/json": { schema: z.object({ settings: WhatsAppSettingsSchema }) } },
+    },
+  },
+});
+
+app.openapi(updateWhatsAppSettingsEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const settings = await updateWhatsAppSettings(body);
+  return c.json({ settings }, 200);
+});
+
+const getWhatsAppLogsEndpoint = createRoute({
+  method: "get",
+  path: "/api/whatsapp/logs",
+  request: {
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "WhatsApp message logs",
+      content: {
+        "application/json": {
+          schema: z.object({
+            logs: z.array(WhatsAppLogSchema),
+            total: z.number(),
+            page: z.number(),
+            limit: z.number(),
+          }),
+        },
+      },
+    },
+  },
+});
+
+app.openapi(getWhatsAppLogsEndpoint, async (c) => {
+  const { page, limit } = c.req.valid("query");
+  const p = Math.max(1, parseInt(page || "1", 10) || 1);
+  const l = Math.min(100, Math.max(1, parseInt(limit || "20", 10) || 20));
+  const res = await listWhatsAppLogs(p, l);
+  return c.json(res, 200);
+});
+
+const sendTestWhatsAppEndpoint = createRoute({
+  method: "post",
+  path: "/api/whatsapp/send-test",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            phone: z.string(),
+            message: z.string(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Test message result",
+      content: { "application/json": { schema: z.object({ result: WhatsAppSendResultSchema }) } },
+    },
+  },
+});
+
+app.openapi(sendTestWhatsAppEndpoint, async (c) => {
+  const { phone, message } = c.req.valid("json");
+  const result = await sendWhatsAppMessage({
+    recipientPhone: phone,
+    recipientName: "Test Recipient",
+    messageType: "test",
+    content: message,
+  });
+  return c.json({ result }, 200);
+});
+
+const sendAppointmentWhatsAppEndpoint = createRoute({
+  method: "post",
+  path: "/api/whatsapp/send-appointment",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            appointment_id: z.number().int(),
+            type: z.enum(["booking_confirmation", "reminder", "reschedule", "cancellation"]),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Appointment message result",
+      content: { "application/json": { schema: z.object({ result: WhatsAppSendResultSchema.nullable() }) } },
+    },
+    404: {
+      description: "Appointment not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+app.openapi(sendAppointmentWhatsAppEndpoint, async (c) => {
+  const { appointment_id, type } = c.req.valid("json");
+  const result = await sendAppointmentNotification(appointment_id, type);
+  if (!result) {
+    return c.json({ error: "Appointment not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+
+const sendReceiptWhatsAppEndpoint = createRoute({
+  method: "post",
+  path: "/api/whatsapp/send-receipt",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            invoice_id: z.number().int(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Receipt message result",
+      content: { "application/json": { schema: z.object({ result: WhatsAppSendResultSchema.nullable() }) } },
+    },
+    404: {
+      description: "Invoice not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+app.openapi(sendReceiptWhatsAppEndpoint, async (c) => {
+  const { invoice_id } = c.req.valid("json");
+  const result = await sendInvoiceReceiptNotification(invoice_id);
+  if (!result) {
+    return c.json({ error: "Invoice not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+
 export default app;
+

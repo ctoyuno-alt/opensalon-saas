@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { useApp } from "../context";
-import { ArrowLeft, Trash2, Send, Clock, User, DollarSign } from "lucide-preact";
+import { ArrowLeft, Trash2, Send, Clock, User, DollarSign, MessageCircle, ExternalLink, Check } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,9 +14,12 @@ export function AppointmentDetail() {
   const {
     selectedAppointment: apt, navigate, updateAppointment, deleteAppointment,
     addAppointmentNote, deleteAppointmentNote, staffLookup, setError,
+    sendAppointmentWhatsApp,
   } = useApp();
   const [noteText, setNoteText] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
+  const [waSending, setWaSending] = useState(false);
+  const [waSuccess, setWaSuccess] = useState<string | null>(null);
 
   if (!apt) return null;
 
@@ -39,6 +42,20 @@ export function AppointmentDetail() {
     if (!noteText.trim()) return;
     await addAppointmentNote(apt.id, noteText.trim());
     setNoteText("");
+  };
+
+  const handleSendWhatsApp = async (type: "booking_confirmation" | "reminder") => {
+    setWaSending(true);
+    setWaSuccess(null);
+    try {
+      const res = await sendAppointmentWhatsApp(apt.id, type);
+      setWaSuccess(res.status === "simulated" ? "Simulated WhatsApp logged! (Fallback link ready)" : "WhatsApp dispatched!");
+      setTimeout(() => setWaSuccess(null), 4000);
+    } catch (err: any) {
+      setError("Failed to send WhatsApp message: " + err.message);
+    } finally {
+      setWaSending(false);
+    }
   };
 
   return (
@@ -105,6 +122,70 @@ export function AppointmentDetail() {
                   <Label className="text-xs text-muted-foreground">Notes</Label>
                   <p className="text-sm">{apt.notes}</p>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* WhatsApp Communications Card */}
+          <Card className="border-emerald-600/30 bg-emerald-50/10 dark:bg-emerald-950/10 shadow-xs">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+                  <MessageCircle className="h-4 w-4" /> WhatsApp Communications
+                </CardTitle>
+                {apt.client_phone && (
+                  <span className="text-xs text-muted-foreground font-mono">
+                    +{apt.client_phone.replace(/[^\d]/g, "")}
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {waSuccess && (
+                <div className="text-xs p-2.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 flex items-center gap-1.5 font-medium">
+                  <Check className="h-3.5 w-3.5" /> {waSuccess}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={waSending || !apt.client_phone}
+                  onClick={() => handleSendWhatsApp("booking_confirmation")}
+                  className="text-xs gap-1.5 border-emerald-600/40 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  {waSending ? "Sending..." : "Send Confirmation"}
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={waSending || !apt.client_phone}
+                  onClick={() => handleSendWhatsApp("reminder")}
+                  className="text-xs gap-1.5 border-emerald-600/40 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                >
+                  <Clock className="h-3.5 w-3.5" />
+                  {waSending ? "Sending..." : "Send Reminder"}
+                </Button>
+
+                {apt.client_phone && (
+                  <a
+                    href={`https://wa.me/${apt.client_phone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(
+                      `Hi ${apt.client_name || ""}, regarding your appointment at OpenSalon on ${apt.scheduled_date} at ${apt.start_time}:`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                  >
+                    Direct Chat <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+              {!apt.client_phone && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Client has no phone number on file. Edit client details to enable WhatsApp messaging.
+                </p>
               )}
             </CardContent>
           </Card>

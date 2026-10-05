@@ -2,7 +2,7 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
-  ClientLookup, StaffLookup, Invoice, Expense,
+  ClientLookup, StaffLookup, Invoice, Expense, WhatsAppSettings, WhatsAppLog, SendWhatsAppResult,
 } from "./types";
 
 export interface AppContextValue {
@@ -100,6 +100,18 @@ export interface AppContextValue {
   setExpensesPage: (page: number) => void;
   createExpense: (data: Partial<Expense>) => Promise<Expense>;
   deleteExpense: (id: number) => Promise<void>;
+
+  // WhatsApp
+  whatsappSettings: WhatsAppSettings | null;
+  whatsappLogs: WhatsAppLog[];
+  whatsappLogsPag: PaginatedState;
+  setWhatsAppLogsPage: (page: number) => void;
+  loadWhatsAppSettings: () => Promise<void>;
+  updateWhatsAppSettings: (data: Partial<WhatsAppSettings>) => Promise<void>;
+  loadWhatsAppLogs: (page?: number) => Promise<void>;
+  sendTestWhatsApp: (phone: string, message: string) => Promise<SendWhatsAppResult>;
+  sendAppointmentWhatsApp: (appointmentId: number, type: "booking_confirmation" | "reminder" | "reschedule" | "cancellation") => Promise<SendWhatsAppResult>;
+  sendReceiptWhatsApp: (invoiceId: number) => Promise<SendWhatsAppResult>;
 
   // Lookups
   clientLookup: ClientLookup[];

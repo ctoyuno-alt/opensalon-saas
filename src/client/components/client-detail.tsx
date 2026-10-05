@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { useApp } from "../context";
-import { ArrowLeft, Trash2, Save, Mail, Phone, Plus } from "lucide-preact";
+import { ArrowLeft, Trash2, Save, Mail, Phone, Plus, MessageCircle } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -77,9 +77,21 @@ export function ClientDetail() {
                   </div>
                 )}
                 {client.phone && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                    {client.phone}
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                      {client.phone}
+                    </div>
+                    <a
+                      href={`https://wa.me/${client.phone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(
+                        `Hi ${client.name}, this is OpenSalon:`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-600/20 transition-colors"
+                    >
+                      <MessageCircle className="h-3 w-3" /> WhatsApp
+                    </a>
                   </div>
                 )}
                 {client.notes && <p className="text-sm text-muted-foreground">{client.notes}</p>}

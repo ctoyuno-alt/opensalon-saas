@@ -8,12 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Receipt, Plus, Trash2, CreditCard, History } from "lucide-preact";
+import { Receipt, Plus, Trash2, CreditCard, History, MessageCircle } from "lucide-preact";
 import type { InvoiceItem } from "../types";
 import { Pagination } from "./pagination";
 
 export function PosBilling() {
-  const { clients, services, products, createInvoice, invoices, invoicesPag, setInvoicesPage, clientLookup } = useApp();
+  const { clients, services, products, createInvoice, invoices, invoicesPag, setInvoicesPage, clientLookup, sendReceiptWhatsApp } = useApp();
   const [clientId, setClientId] = useState<string>("");
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [discount, setDiscount] = useState(0);
@@ -73,6 +73,15 @@ export function PosBilling() {
       alert(err.message || (typeof err === "string" ? err : JSON.stringify(err)));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSendReceipt = async (invId: number) => {
+    try {
+      const res = await sendReceiptWhatsApp(invId);
+      alert(res.status === "simulated" ? "Simulated WhatsApp receipt logged! (Check WhatsApp tab)" : "WhatsApp receipt dispatched!");
+    } catch (e: any) {
+      alert("Failed to send WhatsApp receipt: " + e.message);
     }
   };
 
@@ -251,12 +260,13 @@ export function PosBilling() {
                     <TableHead>Payment</TableHead>
                     <TableHead>Total</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">WhatsApp</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {invoices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         No invoices found.
                       </TableCell>
                     </TableRow>
@@ -269,6 +279,18 @@ export function PosBilling() {
                         <TableCell className="capitalize">{inv.payment_method}</TableCell>
                         <TableCell>${inv.total.toFixed(2)}</TableCell>
                         <TableCell className="capitalize">{inv.status}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                            onClick={() => handleSendReceipt(inv.id)}
+                            title="Send WhatsApp Receipt"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            Receipt
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}

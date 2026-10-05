@@ -1,4 +1,4 @@
-export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses";
+export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses" | "whatsapp";
 
 export interface User {
   id: number;
@@ -175,4 +175,48 @@ export interface Expense {
   expense_date: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface WhatsAppSettings {
+  id: number;
+  provider: "meta" | "simulation";
+  phone_number_id: string;
+  access_token: string;
+  business_account_id: string;
+  sender_phone_number: string;
+  salon_name: string;
+  auto_send_booking_confirmation: number;
+  auto_send_reschedule: number;
+  auto_send_cancellation: number;
+  auto_send_receipt: number;
+  template_booking_confirmation: string;
+  template_reminder: string;
+  template_reschedule: string;
+  template_cancellation: string;
+  template_receipt: string;
+  updated_at?: string;
+}
+
+export interface WhatsAppLog {
+  id: number;
+  recipient_phone: string;
+  recipient_name: string;
+  message_type: string;
+  content: string;
+  status: "sent" | "delivered" | "failed" | "simulated";
+  provider: string;
+  external_id: string;
+  error_message: string;
+  reference_id: number | null;
+  created_at: string;
+}
+
+export interface SendWhatsAppResult {
+  success: boolean;
+  status: "sent" | "simulated" | "failed";
+  messageId?: string;
+  error?: string;
+  waMeUrl: string;
+  content: string;
+  recipientPhone: string;
 }

@@ -3,7 +3,7 @@ import { api } from "../api";
 import { today } from "../lib/dates";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
-  ClientLookup, StaffLookup, Invoice, Expense,
+  ClientLookup, StaffLookup, Invoice, Expense, WhatsAppSettings, WhatsAppLog, SendWhatsAppResult,
 } from "../types";
 import type { AppContextValue } from "../context";
 
@@ -51,6 +51,11 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   // Expenses
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expensesPag, setExpensesPag] = useState<PaginatedState>({ page: 1, limit: 50, total: 0 });
+
+  // WhatsApp
+  const [whatsappSettings, setWhatsappSettings] = useState<WhatsAppSettings | null>(null);
+  const [whatsappLogs, setWhatsappLogs] = useState<WhatsAppLog[]>([]);
+  const [whatsappLogsPag, setWhatsappLogsPag] = useState<PaginatedState>({ page: 1, limit: 20, total: 0 });
 
   // Lookups
   const [clientLookup, setClientLookup] = useState<ClientLookup[]>([]);
@@ -148,6 +153,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
             fetchLookups(),
             fetchInvoices(invoicesPag, ""),
             fetchExpenses(expensesPag),
+            fetchWhatsAppSettings(),
           ]);
         }
       } catch (err) {
@@ -403,6 +409,75 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     await fetchStats();
   }, [expensesPag, fetchExpenses, fetchStats]);
 
+  // ── WhatsApp Actions ──
+
+  const fetchWhatsAppSettings = useCallback(async () => {
+    try {
+      const data = await api<{ settings: WhatsAppSettings }>("GET", "/api/whatsapp/settings");
+      setWhatsappSettings(data.settings);
+    } catch (e: any) {
+      console.error("Failed to load WhatsApp settings:", e);
+    }
+  }, []);
+
+  const fetchWhatsAppLogs = useCallback(async (pag: PaginatedState) => {
+    try {
+      const data = await api<{ logs: WhatsAppLog[]; total: number; page: number; limit: number }>(
+        "GET",
+        `/api/whatsapp/logs?page=${pag.page}&limit=${pag.limit}`
+      );
+      setWhatsappLogs(data.logs);
+      setWhatsappLogsPag((p) => ({ ...p, total: data.total }));
+    } catch (e: any) {
+      console.error("Failed to load WhatsApp logs:", e);
+    }
+  }, []);
+
+  const loadWhatsAppSettings = useCallback(async () => {
+    await fetchWhatsAppSettings();
+  }, [fetchWhatsAppSettings]);
+
+  const updateWhatsAppSettings = useCallback(async (data: Partial<WhatsAppSettings>) => {
+    const res = await api<{ settings: WhatsAppSettings }>("PUT", "/api/whatsapp/settings", data);
+    setWhatsappSettings(res.settings);
+  }, []);
+
+  const loadWhatsAppLogs = useCallback(async (page?: number) => {
+    const targetPag = page !== undefined ? { ...whatsappLogsPag, page } : whatsappLogsPag;
+    if (page !== undefined) setWhatsappLogsPag(targetPag);
+    await fetchWhatsAppLogs(targetPag);
+  }, [whatsappLogsPag, fetchWhatsAppLogs]);
+
+  const setWhatsAppLogsPage = useCallback((page: number) => {
+    setWhatsappLogsPag((p) => ({ ...p, page }));
+  }, []);
+
+  const sendTestWhatsApp = useCallback(async (phone: string, message: string): Promise<SendWhatsAppResult> => {
+    const res = await api<{ result: SendWhatsAppResult }>("POST", "/api/whatsapp/send-test", { phone, message });
+    await fetchWhatsAppLogs(whatsappLogsPag);
+    return res.result;
+  }, [whatsappLogsPag, fetchWhatsAppLogs]);
+
+  const sendAppointmentWhatsApp = useCallback(async (
+    appointmentId: number,
+    type: "booking_confirmation" | "reminder" | "reschedule" | "cancellation"
+  ): Promise<SendWhatsAppResult> => {
+    const res = await api<{ result: SendWhatsAppResult }>("POST", "/api/whatsapp/send-appointment", {
+      appointment_id: appointmentId,
+      type,
+    });
+    await fetchWhatsAppLogs(whatsappLogsPag);
+    return res.result;
+  }, [whatsappLogsPag, fetchWhatsAppLogs]);
+
+  const sendReceiptWhatsApp = useCallback(async (invoiceId: number): Promise<SendWhatsAppResult> => {
+    const res = await api<{ result: SendWhatsAppResult }>("POST", "/api/whatsapp/send-receipt", {
+      invoice_id: invoiceId,
+    });
+    await fetchWhatsAppLogs(whatsappLogsPag);
+    return res.result;
+  }, [whatsappLogsPag, fetchWhatsAppLogs]);
+
   return {
     navigate, isAgent, currentUser, setCurrentUser, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
@@ -421,6 +496,9 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     invoices, invoicesPag, setInvoicesPage, invoicesStatusFilter, setInvoicesStatusFilter,
     createInvoice, updateInvoiceStatus, selectedInvoice, selectInvoice,
     expenses, expensesPag, setExpensesPage, createExpense, deleteExpense,
+    whatsappSettings, whatsappLogs, whatsappLogsPag, setWhatsAppLogsPage,
+    loadWhatsAppSettings, updateWhatsAppSettings, loadWhatsAppLogs,
+    sendTestWhatsApp, sendAppointmentWhatsApp, sendReceiptWhatsApp,
     clientLookup, staffLookup,
     loading, error, setError,
   };

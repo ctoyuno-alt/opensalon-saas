@@ -30,9 +30,17 @@ async function setup(t: { after: (fn: () => void) => void }) {
     const result = stmt.run(...params);
     return { rows: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } };
   } } };
+  const token = await (await import("hono/jwt")).sign(
+    { id: 1, username: "admin", role: "owner", staff_id: null },
+    "super-secret-key-for-opensalon-mvp",
+    "HS256"
+  );
   const call = async (method: string, path: string, body?: object) => {
     const response = await app.request(path, {
-      method, headers: { "content-type": "application/json" },
+      method, headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${token}`,
+      },
       ...(body ? { body: JSON.stringify(body) } : {}),
     }, env);
     return { status: response.status, body: await response.json() };
