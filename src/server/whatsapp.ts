@@ -2,11 +2,15 @@ import { get, query, run } from "./db.js";
 
 export interface WhatsAppSettings {
   id: number;
-  provider: "meta" | "simulation";
+  provider: "meta" | "twilio" | "simulation";
   phone_number_id: string;
   access_token: string;
   business_account_id: string;
   sender_phone_number: string;
+  twilio_account_sid: string;
+  twilio_auth_token: string;
+  twilio_phone_number: string;
+  twilio_content_sid: string;
   salon_name: string;
   auto_send_booking_confirmation: number;
   auto_send_reschedule: number;
@@ -63,6 +67,10 @@ export async function getWhatsAppSettings(): Promise<WhatsAppSettings> {
     access_token: "",
     business_account_id: "",
     sender_phone_number: "",
+    twilio_account_sid: "",
+    twilio_auth_token: "",
+    twilio_phone_number: "+14155238886",
+    twilio_content_sid: "",
     salon_name: "OpenSalon",
     auto_send_booking_confirmation: 1,
     auto_send_reschedule: 1,
@@ -87,6 +95,10 @@ export async function updateWhatsAppSettings(data: Partial<WhatsAppSettings>): P
     "access_token",
     "business_account_id",
     "sender_phone_number",
+    "twilio_account_sid",
+    "twilio_auth_token",
+    "twilio_phone_number",
+    "twilio_content_sid",
     "salon_name",
     "auto_send_booking_confirmation",
     "auto_send_reschedule",
@@ -148,13 +160,122 @@ export async function sendWhatsAppMessage(params: {
     };
   }
 
-  // Simulation mode or unconfigured API credentials
-  const isSimulation = settings.provider === "simulation" || !settings.access_token || !settings.phone_number_id;
-
-  if (isSimulation) {
+  // Simulation mode
+  if (settings.provider === "simulation") {
     await run(
       "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
       [digits, recipientName, messageType, content, "simulated", "simulation", referenceId ?? null]
+    );
+
+    return {
+      success: true,
+      status: "simulated",
+      waMeUrl,
+      content,
+      recipientPhone: digits,
+    };
+  }
+
+  // Send via Twilio WhatsApp API
+  if (settings.provider === "twilio") {
+    if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "simulated", "twilio", referenceId ?? null]
+      );
+      return {
+        success: true,
+        status: "simulated",
+        waMeUrl,
+        content,
+        recipientPhone: digits,
+      };
+    }
+
+    try {
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/Messages.json`;
+      const rawFrom = (settings.twilio_phone_number || "+14155238886").trim();
+      const fromNumber = rawFrom.startsWith("whatsapp:")
+        ? rawFrom
+        : `whatsapp:${rawFrom.startsWith("+") ? rawFrom : `+${rawFrom}`}`;
+      const toNumber = `whatsapp:+${digits}`;
+
+      const basicAuth = btoa(`${settings.twilio_account_sid}:${settings.twilio_auth_token}`);
+      const formParams = new URLSearchParams();
+      formParams.append("From", fromNumber);
+      formParams.append("To", toNumber);
+
+      if (settings.twilio_content_sid?.trim()) {
+        formParams.append("ContentSid", settings.twilio_content_sid.trim());
+        formParams.append("ContentVariables", JSON.stringify({ "1": content }));
+      } else {
+        formParams.append("Body", content);
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formParams.toString(),
+      });
+
+      const data = await response.json() as any;
+
+      if (response.ok && data.sid) {
+        await run(
+          "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, external_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "sent", "twilio", data.sid, referenceId ?? null]
+        );
+        return {
+          success: true,
+          status: "sent",
+          messageId: data.sid,
+          waMeUrl,
+          content,
+          recipientPhone: digits,
+        };
+      } else {
+        let errorMsg = data?.message || `Twilio error ${data?.code || response.status}`;
+        if (errorMsg.includes("ContentSid Required")) {
+          errorMsg = "ContentSid Required: Recipient phone has not joined Twilio Sandbox (send 'join <code-word>' to +1 415 523 8886) or an approved ContentSid is required.";
+        }
+        await run(
+          "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+        );
+        return {
+          success: false,
+          status: "failed",
+          error: errorMsg,
+          waMeUrl,
+          content,
+          recipientPhone: digits,
+        };
+      }
+    } catch (err: any) {
+      const errorMsg = err?.message || "Network exception sending Twilio WhatsApp message";
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+      );
+      return {
+        success: false,
+        status: "failed",
+        error: errorMsg,
+        waMeUrl,
+        content,
+        recipientPhone: digits,
+      };
+    }
+  }
+
+  // Meta Cloud API unconfigured check
+  if (!settings.access_token || !settings.phone_number_id) {
+    await run(
+      "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [digits, recipientName, messageType, content, "simulated", "meta", referenceId ?? null]
     );
 
     return {

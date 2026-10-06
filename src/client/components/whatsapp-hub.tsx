@@ -144,10 +144,20 @@ export function WhatsAppHub() {
 
         <div className="flex items-center gap-2">
           <Badge
-            variant={formData.provider === "meta" && formData.access_token ? "default" : "secondary"}
+            variant={
+              (formData.provider === "twilio" && formData.twilio_account_sid) ||
+              (formData.provider === "meta" && formData.access_token)
+                ? "default"
+                : "secondary"
+            }
             className="px-3 py-1 text-xs font-semibold gap-1.5"
           >
-            {formData.provider === "meta" && formData.access_token ? (
+            {formData.provider === "twilio" && formData.twilio_account_sid ? (
+              <>
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                Twilio WhatsApp Active
+              </>
+            ) : formData.provider === "meta" && formData.access_token ? (
               <>
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
                 Meta Cloud API Active
@@ -220,7 +230,7 @@ export function WhatsAppHub() {
               <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             </div>
             <div className="mt-2 text-2xl font-bold">{sentCount}</div>
-            <p className="text-xs text-muted-foreground mt-1">Meta Cloud API dispatches</p>
+            <p className="text-xs text-muted-foreground mt-1">API dispatches via Twilio/Meta</p>
           </CardContent>
         </Card>
       </div>
@@ -502,14 +512,35 @@ export function WhatsAppHub() {
                 WhatsApp Service Provider Setup
               </CardTitle>
               <CardDescription>
-                Configure Meta WhatsApp Cloud API credentials or enable Interactive Simulation mode
+                Configure Twilio WhatsApp, Meta WhatsApp Cloud API credentials, or Interactive Simulation mode
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold">Delivery Provider Mode</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFormData((p) => ({ ...p, provider: "twilio" }))}
+                      className={`p-3 text-left rounded-lg border text-sm transition-all relative ${
+                        formData.provider === "twilio"
+                          ? "border-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20 ring-1 ring-emerald-600"
+                          : "border-border hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="font-semibold flex items-center gap-1.5 text-xs sm:text-sm">
+                        <Smartphone className="h-4 w-4 text-emerald-600" />
+                        Twilio WhatsApp
+                      </div>
+                      <Badge variant="outline" className="mt-1 text-[10px] text-emerald-600 border-emerald-300">
+                        Fastest Sandbox Test
+                      </Badge>
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        Free sandbox testing. Bypasses Meta Developer phone verification blocks.
+                      </p>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => setFormData((p) => ({ ...p, provider: "meta" }))}
@@ -519,11 +550,11 @@ export function WhatsAppHub() {
                           : "border-border hover:bg-muted/40"
                       }`}
                     >
-                      <div className="font-semibold flex items-center gap-1.5">
-                        <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                        Meta WhatsApp Cloud API
+                      <div className="font-semibold flex items-center gap-1.5 text-xs sm:text-sm">
+                        <ShieldCheck className="h-4 w-4 text-blue-600" />
+                        Meta Cloud API
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
+                      <p className="text-xs text-muted-foreground mt-1.5">
                         Direct API dispatch via Meta's Graph API. Requires Facebook Business credentials.
                       </p>
                     </button>
@@ -537,11 +568,11 @@ export function WhatsAppHub() {
                           : "border-border hover:bg-muted/40"
                       }`}
                     >
-                      <div className="font-semibold flex items-center gap-1.5">
+                      <div className="font-semibold flex items-center gap-1.5 text-xs sm:text-sm">
                         <Sparkles className="h-4 w-4 text-amber-500" />
-                        Simulation & Direct wa.me
+                        Simulation & wa.me
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
+                      <p className="text-xs text-muted-foreground mt-1.5">
                         Zero setup required. Logs messages to history and generates 1-click wa.me links.
                       </p>
                     </button>
@@ -559,6 +590,72 @@ export function WhatsAppHub() {
                   />
                   <p className="text-[11px] text-muted-foreground">Used in template tags as {`{{salon_name}}`}</p>
                 </div>
+
+                {formData.provider === "twilio" && (
+                  <div className="space-y-4 pt-2">
+                    <div className="rounded-lg bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50 p-3.5 space-y-2 text-xs text-emerald-950 dark:text-emerald-200">
+                      <div className="font-semibold flex items-center gap-1.5 text-sm text-emerald-800 dark:text-emerald-300">
+                        <Sparkles className="h-4 w-4 text-emerald-600" />
+                        Twilio WhatsApp Sandbox Setup
+                      </div>
+                      <ol className="list-decimal pl-4 space-y-2 text-muted-foreground dark:text-emerald-300/90 leading-relaxed">
+                        <li>
+                          Open your <a href="https://console.twilio.com" target="_blank" rel="noopener noreferrer" className="underline font-medium text-emerald-700 dark:text-emerald-400">Twilio Console</a> &gt; <strong>Messaging &gt; Try it out &gt; Send a WhatsApp message</strong>.
+                        </li>
+                        <li>
+                          <strong>Crucial Opt-In Step:</strong> From the recipient phone (e.g. your WhatsApp on your mobile), send your unique sandbox keyword (e.g. <code>join &lt;two-words&gt;</code>) to <strong>+1 415 523 8886</strong>.
+                          <div className="mt-1 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-[11px]">
+                            ⚠️ <strong>ContentSid Required Error:</strong> If the recipient has not sent the join code, WhatsApp blocks outbound freeform text until the 24-hour window is opened by the user.
+                          </div>
+                        </li>
+                        <li>
+                          Copy your <strong>Account SID</strong> and <strong>Auth Token</strong> from the Twilio Console dashboard and paste them below.
+                        </li>
+                      </ol>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold">Twilio Account SID</label>
+                      <Input
+                        value={formData.twilio_account_sid || ""}
+                        onChange={(e) => setFormData((p) => ({ ...p, twilio_account_sid: (e.target as HTMLInputElement).value }))}
+                        placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold">Twilio Auth Token</label>
+                      <Input
+                        type="password"
+                        value={formData.twilio_auth_token || ""}
+                        onChange={(e) => setFormData((p) => ({ ...p, twilio_auth_token: (e.target as HTMLInputElement).value }))}
+                        placeholder="Your Twilio Auth Token"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold">Twilio WhatsApp Sender Number</label>
+                      <Input
+                        value={formData.twilio_phone_number || "+14155238886"}
+                        onChange={(e) => setFormData((p) => ({ ...p, twilio_phone_number: (e.target as HTMLInputElement).value }))}
+                        placeholder="+14155238886"
+                      />
+                      <p className="text-[11px] text-muted-foreground">Default Twilio Sandbox sender is +14155238886. If using an approved production sender, enter it here.</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold">Twilio Content Template SID (Optional)</label>
+                      <Input
+                        value={formData.twilio_content_sid || ""}
+                        onChange={(e) => setFormData((p) => ({ ...p, twilio_content_sid: (e.target as HTMLInputElement).value }))}
+                        placeholder="HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (starts with HX)"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Optional. If provided, messages dispatch via Twilio's approved Content Template. If left blank, freeform text is sent (requires recipient to have joined sandbox).
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {formData.provider === "meta" && (
                   <div className="space-y-4 pt-2">
@@ -678,16 +775,41 @@ export function WhatsAppHub() {
                 <CardContent className="space-y-3 text-xs">
                   {testResult.status === "simulated" ? (
                     <p className="text-muted-foreground">
-                      Message logged in <strong>Simulation Mode</strong>. Since Meta API credentials are not yet saved or provider is set to simulation, OpenSalon created a verified log and generated a 1-click WhatsApp Web / App link.
+                      Message logged in <strong>Simulation Mode</strong>. Since API credentials are not yet saved or provider is set to simulation, OpenSalon created a verified log and generated a 1-click WhatsApp Web / App link.
                     </p>
                   ) : testResult.status === "sent" ? (
                     <p className="text-emerald-700 dark:text-emerald-400 font-medium">
-                      Delivered via Meta Cloud API! WhatsApp Message ID recorded.
+                      Delivered via {formData.provider === "twilio" ? "Twilio WhatsApp API" : "Meta Cloud API"}! Message ID: <code className="font-mono bg-emerald-100 dark:bg-emerald-900/50 px-1 py-0.5 rounded">{testResult.messageId}</code>
                     </p>
                   ) : (
-                    <p className="text-destructive font-medium">
-                      Error: {testResult.error}
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-destructive font-medium">
+                        Error: {testResult.error}
+                      </p>
+                      {testResult.error?.includes("ContentSid Required") ? (
+                        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs space-y-2 leading-relaxed">
+                          <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            Why did this happen?
+                          </p>
+                          <p>
+                            WhatsApp anti-spam policy blocks outbound freeform text until the recipient has opened a 24-hour conversation window by messaging your Twilio Sandbox first.
+                          </p>
+                          <div className="pt-1">
+                            <span className="font-semibold block mb-1">To fix this in 30 seconds:</span>
+                            <ol className="list-decimal pl-4 space-y-1">
+                              <li>Open WhatsApp on the recipient mobile phone (<strong>{testPhone}</strong>).</li>
+                              <li>Send your Twilio Sandbox join code (found in Twilio Console under <em>Try WhatsApp</em>, e.g. <code>join &lt;two-words&gt;</code>) to <strong>+1 415 523 8886</strong>.</li>
+                              <li>Wait for Twilio's reply: <em>"You are all set!"</em>.</li>
+                              <li>Click <strong>Dispatch Message</strong> again — it will succeed immediately!</li>
+                            </ol>
+                          </div>
+                        </div>
+                      ) : formData.provider === "twilio" ? (
+                        <p className="text-muted-foreground text-[11px] leading-relaxed">
+                          Tip: In Twilio Sandbox mode, the recipient phone number must first opt-in by sending the sandbox <code>join &lt;code&gt;</code> keyword to <code>+1 415 523 8886</code>.
+                        </p>
+                      ) : null}
+                    </div>
                   )}
 
                   <div className="pt-2">
@@ -755,7 +877,7 @@ export function WhatsAppHub() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-muted/50 border-y border-border/60 font-semibold text-muted-foreground uppercase tracking-wider">
                     <tr>
-                      <th className="py-2.5 px-4">Status</th>
+                      <th className="py-2.5 px-4">Status & Provider</th>
                       <th className="py-2.5 px-4">Recipient</th>
                       <th className="py-2.5 px-4">Type</th>
                       <th className="py-2.5 px-4">Content</th>
@@ -769,18 +891,30 @@ export function WhatsAppHub() {
                       return (
                         <tr key={log.id} className="hover:bg-muted/30 transition-colors">
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <Badge
-                              variant={
-                                log.status === "sent"
-                                  ? "default"
-                                  : log.status === "simulated"
-                                  ? "secondary"
-                                  : "destructive"
-                              }
-                              className="text-[10px] uppercase font-semibold"
-                            >
-                              {log.status}
-                            </Badge>
+                            <div className="flex items-center gap-1.5">
+                              <Badge
+                                variant={
+                                  log.status === "sent"
+                                    ? "default"
+                                    : log.status === "simulated"
+                                    ? "secondary"
+                                    : "destructive"
+                                }
+                                className="text-[10px] uppercase font-semibold"
+                              >
+                                {log.status}
+                              </Badge>
+                              {log.provider && (
+                                <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                                  {log.provider}
+                                </span>
+                              )}
+                            </div>
+                            {log.error_message && (
+                              <div className="text-[10px] text-destructive mt-1 max-w-[200px] truncate" title={log.error_message}>
+                                {log.error_message}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-4 font-medium whitespace-nowrap">
                             <div>{log.recipient_name || "Client"}</div>

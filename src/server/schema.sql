@@ -173,11 +173,15 @@ CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
 -- WhatsApp Settings & Configuration
 CREATE TABLE IF NOT EXISTS whatsapp_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  provider TEXT NOT NULL DEFAULT 'meta', -- 'meta', 'simulation'
+  provider TEXT NOT NULL DEFAULT 'meta', -- 'meta', 'twilio', 'simulation'
   phone_number_id TEXT DEFAULT '',
   access_token TEXT DEFAULT '',
   business_account_id TEXT DEFAULT '',
   sender_phone_number TEXT DEFAULT '',
+  twilio_account_sid TEXT DEFAULT '',
+  twilio_auth_token TEXT DEFAULT '',
+  twilio_phone_number TEXT DEFAULT '+14155238886',
+  twilio_content_sid TEXT DEFAULT '',
   salon_name TEXT DEFAULT 'OpenSalon',
   auto_send_booking_confirmation INTEGER NOT NULL DEFAULT 1,
   auto_send_reschedule INTEGER NOT NULL DEFAULT 1,

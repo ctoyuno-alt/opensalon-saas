@@ -9936,6 +9936,10 @@ async function getWhatsAppSettings() {
     access_token: "",
     business_account_id: "",
     sender_phone_number: "",
+    twilio_account_sid: "",
+    twilio_auth_token: "",
+    twilio_phone_number: "+14155238886",
+    twilio_content_sid: "",
     salon_name: "OpenSalon",
     auto_send_booking_confirmation: 1,
     auto_send_reschedule: 1,
@@ -9959,6 +9963,10 @@ async function updateWhatsAppSettings(data) {
     "access_token",
     "business_account_id",
     "sender_phone_number",
+    "twilio_account_sid",
+    "twilio_auth_token",
+    "twilio_phone_number",
+    "twilio_content_sid",
     "salon_name",
     "auto_send_booking_confirmation",
     "auto_send_reschedule",
@@ -10009,11 +10017,108 @@ async function sendWhatsAppMessage(params) {
       recipientPhone
     };
   }
-  const isSimulation = settings.provider === "simulation" || !settings.access_token || !settings.phone_number_id;
-  if (isSimulation) {
+  if (settings.provider === "simulation") {
     await run(
       "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
       [digits, recipientName, messageType, content, "simulated", "simulation", referenceId ?? null]
+    );
+    return {
+      success: true,
+      status: "simulated",
+      waMeUrl,
+      content,
+      recipientPhone: digits
+    };
+  }
+  if (settings.provider === "twilio") {
+    if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "simulated", "twilio", referenceId ?? null]
+      );
+      return {
+        success: true,
+        status: "simulated",
+        waMeUrl,
+        content,
+        recipientPhone: digits
+      };
+    }
+    try {
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/Messages.json`;
+      const rawFrom = (settings.twilio_phone_number || "+14155238886").trim();
+      const fromNumber = rawFrom.startsWith("whatsapp:") ? rawFrom : `whatsapp:${rawFrom.startsWith("+") ? rawFrom : `+${rawFrom}`}`;
+      const toNumber = `whatsapp:+${digits}`;
+      const basicAuth = btoa(`${settings.twilio_account_sid}:${settings.twilio_auth_token}`);
+      const formParams = new URLSearchParams();
+      formParams.append("From", fromNumber);
+      formParams.append("To", toNumber);
+      if (settings.twilio_content_sid?.trim()) {
+        formParams.append("ContentSid", settings.twilio_content_sid.trim());
+        formParams.append("ContentVariables", JSON.stringify({ "1": content }));
+      } else {
+        formParams.append("Body", content);
+      }
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: formParams.toString()
+      });
+      const data = await response.json();
+      if (response.ok && data.sid) {
+        await run(
+          "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, external_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "sent", "twilio", data.sid, referenceId ?? null]
+        );
+        return {
+          success: true,
+          status: "sent",
+          messageId: data.sid,
+          waMeUrl,
+          content,
+          recipientPhone: digits
+        };
+      } else {
+        let errorMsg = data?.message || `Twilio error ${data?.code || response.status}`;
+        if (errorMsg.includes("ContentSid Required")) {
+          errorMsg = "ContentSid Required: Recipient phone has not joined Twilio Sandbox (send 'join <code-word>' to +1 415 523 8886) or an approved ContentSid is required.";
+        }
+        await run(
+          "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+        );
+        return {
+          success: false,
+          status: "failed",
+          error: errorMsg,
+          waMeUrl,
+          content,
+          recipientPhone: digits
+        };
+      }
+    } catch (err) {
+      const errorMsg = err?.message || "Network exception sending Twilio WhatsApp message";
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+      );
+      return {
+        success: false,
+        status: "failed",
+        error: errorMsg,
+        waMeUrl,
+        content,
+        recipientPhone: digits
+      };
+    }
+  }
+  if (!settings.access_token || !settings.phone_number_id) {
+    await run(
+      "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [digits, recipientName, messageType, content, "simulated", "meta", referenceId ?? null]
     );
     return {
       success: true,
@@ -10326,11 +10431,15 @@ var ProductSchema = external_exports.object({
 }).openapi("Product");
 var WhatsAppSettingsSchema = external_exports.object({
   id: external_exports.number().int(),
-  provider: external_exports.enum(["meta", "simulation"]),
-  phone_number_id: external_exports.string(),
-  access_token: external_exports.string(),
-  business_account_id: external_exports.string(),
-  sender_phone_number: external_exports.string(),
+  provider: external_exports.enum(["meta", "twilio", "simulation"]),
+  phone_number_id: external_exports.string().optional().default(""),
+  access_token: external_exports.string().optional().default(""),
+  business_account_id: external_exports.string().optional().default(""),
+  sender_phone_number: external_exports.string().optional().default(""),
+  twilio_account_sid: external_exports.string().optional().default(""),
+  twilio_auth_token: external_exports.string().optional().default(""),
+  twilio_phone_number: external_exports.string().optional().default("+14155238886"),
+  twilio_content_sid: external_exports.string().optional().default(""),
   salon_name: external_exports.string(),
   auto_send_booking_confirmation: external_exports.number().int(),
   auto_send_reschedule: external_exports.number().int(),
@@ -10344,11 +10453,15 @@ var WhatsAppSettingsSchema = external_exports.object({
   updated_at: external_exports.string().optional()
 }).openapi("WhatsAppSettings");
 var UpdateWhatsAppSettingsSchema = external_exports.object({
-  provider: external_exports.enum(["meta", "simulation"]).optional(),
+  provider: external_exports.enum(["meta", "twilio", "simulation"]).optional(),
   phone_number_id: external_exports.string().optional(),
   access_token: external_exports.string().optional(),
   business_account_id: external_exports.string().optional(),
   sender_phone_number: external_exports.string().optional(),
+  twilio_account_sid: external_exports.string().optional(),
+  twilio_auth_token: external_exports.string().optional(),
+  twilio_phone_number: external_exports.string().optional(),
+  twilio_content_sid: external_exports.string().optional(),
   salon_name: external_exports.string().optional(),
   auto_send_booking_confirmation: external_exports.number().int().optional(),
   auto_send_reschedule: external_exports.number().int().optional(),

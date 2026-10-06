@@ -213,11 +213,15 @@ const ProductSchema = z.object({
 
 const WhatsAppSettingsSchema = z.object({
   id: z.number().int(),
-  provider: z.enum(["meta", "simulation"]),
-  phone_number_id: z.string(),
-  access_token: z.string(),
-  business_account_id: z.string(),
-  sender_phone_number: z.string(),
+  provider: z.enum(["meta", "twilio", "simulation"]),
+  phone_number_id: z.string().optional().default(""),
+  access_token: z.string().optional().default(""),
+  business_account_id: z.string().optional().default(""),
+  sender_phone_number: z.string().optional().default(""),
+  twilio_account_sid: z.string().optional().default(""),
+  twilio_auth_token: z.string().optional().default(""),
+  twilio_phone_number: z.string().optional().default("+14155238886"),
+  twilio_content_sid: z.string().optional().default(""),
   salon_name: z.string(),
   auto_send_booking_confirmation: z.number().int(),
   auto_send_reschedule: z.number().int(),
@@ -232,11 +236,15 @@ const WhatsAppSettingsSchema = z.object({
 }).openapi("WhatsAppSettings");
 
 const UpdateWhatsAppSettingsSchema = z.object({
-  provider: z.enum(["meta", "simulation"]).optional(),
+  provider: z.enum(["meta", "twilio", "simulation"]).optional(),
   phone_number_id: z.string().optional(),
   access_token: z.string().optional(),
   business_account_id: z.string().optional(),
   sender_phone_number: z.string().optional(),
+  twilio_account_sid: z.string().optional(),
+  twilio_auth_token: z.string().optional(),
+  twilio_phone_number: z.string().optional(),
+  twilio_content_sid: z.string().optional(),
   salon_name: z.string().optional(),
   auto_send_booking_confirmation: z.number().int().optional(),
   auto_send_reschedule: z.number().int().optional(),

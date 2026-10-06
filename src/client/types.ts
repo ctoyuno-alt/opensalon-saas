@@ -179,11 +179,15 @@ export interface Expense {
 
 export interface WhatsAppSettings {
   id: number;
-  provider: "meta" | "simulation";
+  provider: "meta" | "twilio" | "simulation";
   phone_number_id: string;
   access_token: string;
   business_account_id: string;
   sender_phone_number: string;
+  twilio_account_sid?: string;
+  twilio_auth_token?: string;
+  twilio_phone_number?: string;
+  twilio_content_sid?: string;
   salon_name: string;
   auto_send_booking_confirmation: number;
   auto_send_reschedule: number;
