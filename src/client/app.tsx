@@ -16,6 +16,8 @@ import { ProductList } from "./components/product-list";
 import { PosBilling } from "./components/pos";
 import { Expenses } from "./components/expenses";
 import { WhatsAppHub } from "./components/whatsapp-hub";
+import { GrowthDashboard } from "./components/growth-dashboard";
+import { MembershipsHub } from "./components/memberships-hub";
 import { ErrorBanner } from "./components/error-banner";
 import { Login } from "./components/login";
 import { PublicBooking } from "./public-booking";
@@ -61,6 +63,8 @@ export function App() {
       case "pos": return <PosBilling />;
       case "expenses": return <Expenses />;
       case "whatsapp": return <WhatsAppHub />;
+      case "growth": return <GrowthDashboard />;
+      case "memberships": return <MembershipsHub />;
       default: return <Dashboard />;
     }
   };

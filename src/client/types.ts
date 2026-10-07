@@ -1,4 +1,4 @@
-export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses" | "whatsapp";
+export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses" | "whatsapp" | "growth" | "memberships";
 
 export interface User {
   id: number;
@@ -57,6 +57,10 @@ export interface Client {
   phone: string;
   notes: string;
   appointment_count?: number;
+  loyalty_points?: number;
+  total_spent?: number;
+  total_visits?: number;
+  last_visit_date?: string;
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +72,8 @@ export interface Staff {
   phone: string;
   title: string;
   color: string;
+  base_salary?: number;
+  commission_percent?: number;
   active: number;
   appointment_count?: number;
   created_at: string;
@@ -161,11 +167,21 @@ export interface Invoice {
   tax: number;
   total: number;
   payment_method: string;
+  split_cash?: number;
+  split_upi?: number;
+  split_card?: number;
+  coupon_code?: string;
+  coupon_discount?: number;
+  loyalty_points_redeemed?: number;
+  loyalty_discount?: number;
   status: "pending" | "paid" | "cancelled";
   created_at: string;
   updated_at: string;
   items?: InvoiceItem[];
+  client_name?: string;
+  client_phone?: string;
 }
+
 
 export interface Expense {
   id: number;
@@ -224,3 +240,117 @@ export interface SendWhatsAppResult {
   content: string;
   recipientPhone: string;
 }
+
+export interface Membership {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  duration_days: number;
+  service_discount_percent: number;
+  product_discount_percent: number;
+  included_services_count: number;
+  bonus_loyalty_points: number;
+  active: number;
+  created_at?: string;
+}
+
+export interface ClientMembership {
+  id: number;
+  client_id: number;
+  membership_id: number;
+  membership_name?: string;
+  client_name?: string;
+  client_phone?: string;
+  start_date: string;
+  end_date: string;
+  services_total: number;
+  services_used: number;
+  status: "active" | "expired" | "cancelled";
+  price?: number;
+  created_at?: string;
+}
+
+export interface LoyaltyTransaction {
+  id: number;
+  client_id: number;
+  client_name?: string;
+  points: number;
+  transaction_type: "earned_invoice" | "redeemed_pos" | "membership_bonus" | "birthday_reward" | "adjustment";
+  reference_id: number | null;
+  notes: string;
+  created_at?: string;
+}
+
+export interface Coupon {
+  id: number;
+  code: string;
+  description: string;
+  discount_type: "flat" | "percent";
+  discount_value: number;
+  min_order_amount: number;
+  valid_until: string;
+  is_active: number;
+  usage_limit: number;
+  times_used: number;
+  created_at?: string;
+}
+
+export interface StaffCommission {
+  id: number;
+  staff_id: number;
+  staff_name?: string;
+  invoice_id: number;
+  item_name: string;
+  item_type: "service" | "product";
+  item_price: number;
+  commission_percent: number;
+  commission_amount: number;
+  created_at?: string;
+}
+
+export interface InactiveClientAlert {
+  id: number;
+  name: string;
+  phone: string;
+  days_since_last_visit: number;
+  last_visit_date: string;
+  total_spent: number;
+  total_visits: number;
+  suggested_discount: string;
+  suggested_message: string;
+  whatsapp_url: string;
+}
+
+export interface SlowHourOpportunity {
+  day_name: string;
+  slot_label: string;
+  historical_bookings: number;
+  recommended_deal: string;
+  promo_code: string;
+  estimated_lift: string;
+}
+
+export interface StylistLeaderboard {
+  staff_id: number;
+  staff_name: string;
+  staff_title: string;
+  staff_color: string;
+  completed_appointments: number;
+  service_revenue: number;
+  product_revenue: number;
+  total_sales: number;
+  commission_earned: number;
+  rank: number;
+}
+
+export interface GrowthInsights {
+  inactive_clients: InactiveClientAlert[];
+  slow_hours: SlowHourOpportunity[];
+  stylist_leaderboard: StylistLeaderboard[];
+  total_members: number;
+  loyalty_points_in_circulation: number;
+  repeat_client_rate: number;
+  avg_ticket_size: number;
+}
+

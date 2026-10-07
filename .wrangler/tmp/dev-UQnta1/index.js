@@ -9892,6 +9892,15 @@ async function ensureSeeded() {
     await seedIfEmpty("products", ["id", "name", "brand", "category", "price", "cost", "stock"], PRODUCTS);
     await seedIfEmpty("users", ["id", "username", "password_hash", "role"], USERS);
     await run("INSERT OR IGNORE INTO whatsapp_settings (id, provider) VALUES (1, 'meta')");
+    await run(`INSERT OR IGNORE INTO memberships (id, name, description, price, duration_days, service_discount_percent, product_discount_percent, included_services_count, bonus_loyalty_points)
+      VALUES 
+        (1, 'GOLD VIP', '12 Haircuts/year + 10% off services + 15% off products', 4999, 365, 10, 15, 12, 500),
+        (2, 'SILVER CLUB', '6 Haircuts/year + 5% off services + 10% off products', 2499, 180, 5, 10, 6, 250)`);
+    await run(`INSERT OR IGNORE INTO coupons (id, code, description, discount_type, discount_value, min_order_amount, is_active)
+      VALUES
+        (1, 'COMEBACK200', 'Special \u20B9200 OFF on your comeback visit!', 'flat', 200, 500, 1),
+        (2, 'MONDAY50', '50% OFF on Monday slow-hours booking', 'percent', 50, 400, 1),
+        (3, 'WELCOME15', '15% OFF on first visit', 'percent', 15, 300, 1)`);
     seeded = true;
   } catch {
     seeded = false;
@@ -10331,10 +10340,19 @@ var InvoiceSchema = external_exports.object({
   tax: external_exports.number(),
   total: external_exports.number(),
   payment_method: external_exports.string(),
+  split_cash: external_exports.number().optional().nullable(),
+  split_upi: external_exports.number().optional().nullable(),
+  split_card: external_exports.number().optional().nullable(),
+  coupon_code: external_exports.string().optional().nullable(),
+  coupon_discount: external_exports.number().optional().nullable(),
+  loyalty_points_redeemed: external_exports.number().int().optional().nullable(),
+  loyalty_discount: external_exports.number().optional().nullable(),
   status: external_exports.string(),
   created_at: external_exports.string(),
   updated_at: external_exports.string(),
-  items: external_exports.array(InvoiceItemSchema).optional()
+  items: external_exports.array(InvoiceItemSchema).optional(),
+  client_name: external_exports.string().optional().nullable(),
+  client_phone: external_exports.string().optional().nullable()
 }).openapi("Invoice");
 var ClientSchema = external_exports.object({
   id: external_exports.number().int(),
@@ -10343,6 +10361,10 @@ var ClientSchema = external_exports.object({
   phone: external_exports.string(),
   notes: external_exports.string(),
   appointment_count: external_exports.number().int().optional(),
+  loyalty_points: external_exports.number().int().optional().nullable(),
+  total_spent: external_exports.number().optional().nullable(),
+  total_visits: external_exports.number().int().optional().nullable(),
+  last_visit_date: external_exports.string().optional().nullable(),
   created_at: external_exports.string(),
   updated_at: external_exports.string()
 }).openapi("Client");
@@ -10353,10 +10375,115 @@ var StaffSchema = external_exports.object({
   phone: external_exports.string(),
   title: external_exports.string(),
   color: external_exports.string(),
+  base_salary: external_exports.number().optional().nullable(),
+  commission_percent: external_exports.number().optional().nullable(),
   active: external_exports.number().int(),
   appointment_count: external_exports.number().int().optional(),
   created_at: external_exports.string()
 }).openapi("Staff");
+var MembershipSchema = external_exports.object({
+  id: external_exports.number().int(),
+  name: external_exports.string(),
+  description: external_exports.string().optional().nullable(),
+  price: external_exports.number(),
+  duration_days: external_exports.number().int(),
+  service_discount_percent: external_exports.number(),
+  product_discount_percent: external_exports.number(),
+  included_services_count: external_exports.number().int(),
+  bonus_loyalty_points: external_exports.number().int(),
+  active: external_exports.number().int(),
+  created_at: external_exports.string().optional()
+}).openapi("Membership");
+var ClientMembershipSchema = external_exports.object({
+  id: external_exports.number().int(),
+  client_id: external_exports.number().int(),
+  membership_id: external_exports.number().int(),
+  membership_name: external_exports.string().optional().nullable(),
+  client_name: external_exports.string().optional().nullable(),
+  client_phone: external_exports.string().optional().nullable(),
+  start_date: external_exports.string(),
+  end_date: external_exports.string(),
+  services_total: external_exports.number().int(),
+  services_used: external_exports.number().int(),
+  status: external_exports.string(),
+  created_at: external_exports.string().optional()
+}).openapi("ClientMembership");
+var LoyaltyTransactionSchema = external_exports.object({
+  id: external_exports.number().int(),
+  client_id: external_exports.number().int(),
+  client_name: external_exports.string().optional().nullable(),
+  points: external_exports.number().int(),
+  transaction_type: external_exports.string(),
+  reference_id: external_exports.number().int().optional().nullable(),
+  notes: external_exports.string().optional().nullable(),
+  created_at: external_exports.string().optional()
+}).openapi("LoyaltyTransaction");
+var CouponSchema = external_exports.object({
+  id: external_exports.number().int(),
+  code: external_exports.string(),
+  description: external_exports.string().optional().nullable(),
+  discount_type: external_exports.string(),
+  discount_value: external_exports.number(),
+  min_order_amount: external_exports.number().optional().default(0),
+  valid_until: external_exports.string().optional().nullable(),
+  is_active: external_exports.number().int().optional().default(1),
+  usage_limit: external_exports.number().int().optional().nullable(),
+  times_used: external_exports.number().int().optional().default(0),
+  created_at: external_exports.string().optional()
+}).openapi("Coupon");
+var StaffCommissionSchema = external_exports.object({
+  id: external_exports.number().int(),
+  staff_id: external_exports.number().int(),
+  staff_name: external_exports.string().optional().nullable(),
+  invoice_id: external_exports.number().int(),
+  item_name: external_exports.string(),
+  item_type: external_exports.string(),
+  item_price: external_exports.number(),
+  commission_percent: external_exports.number(),
+  commission_amount: external_exports.number(),
+  created_at: external_exports.string().optional()
+}).openapi("StaffCommission");
+var InactiveClientAlertSchema = external_exports.object({
+  id: external_exports.number().int(),
+  name: external_exports.string(),
+  phone: external_exports.string(),
+  days_since_last_visit: external_exports.number().int(),
+  last_visit_date: external_exports.string(),
+  total_spent: external_exports.number(),
+  total_visits: external_exports.number().int(),
+  suggested_discount: external_exports.string(),
+  suggested_message: external_exports.string(),
+  whatsapp_url: external_exports.string()
+}).openapi("InactiveClientAlert");
+var SlowHourOpportunitySchema = external_exports.object({
+  day_name: external_exports.string(),
+  slot_label: external_exports.string(),
+  historical_bookings: external_exports.number().int(),
+  recommended_deal: external_exports.string(),
+  promo_code: external_exports.string(),
+  estimated_lift: external_exports.string()
+}).openapi("SlowHourOpportunity");
+var StylistLeaderboardSchema = external_exports.object({
+  staff_id: external_exports.number().int(),
+  staff_name: external_exports.string(),
+  staff_title: external_exports.string(),
+  staff_color: external_exports.string(),
+  completed_appointments: external_exports.number().int(),
+  service_revenue: external_exports.number(),
+  product_revenue: external_exports.number(),
+  total_sales: external_exports.number(),
+  commission_earned: external_exports.number(),
+  rank: external_exports.number().int()
+}).openapi("StylistLeaderboard");
+var GrowthInsightsSchema = external_exports.object({
+  inactive_clients: external_exports.array(InactiveClientAlertSchema),
+  slow_hours: external_exports.array(SlowHourOpportunitySchema),
+  stylist_leaderboard: external_exports.array(StylistLeaderboardSchema),
+  total_members: external_exports.number().int(),
+  loyalty_points_in_circulation: external_exports.number().int(),
+  repeat_client_rate: external_exports.number(),
+  avg_ticket_size: external_exports.number()
+}).openapi("GrowthInsights");
 var ServiceSchema = external_exports.object({
   id: external_exports.number().int(),
   name: external_exports.string(),
@@ -10712,15 +10839,15 @@ app.openapi(listInvoices, async (c) => {
   const limit = parseInt(c.req.query("limit") || "50", 10);
   const offset = (page - 1) * limit;
   const status = c.req.query("status");
-  let q = "SELECT * FROM invoices";
+  let q = "SELECT i.*, c.name as client_name, c.phone as client_phone FROM invoices i LEFT JOIN clients c ON i.client_id = c.id";
   let countQ = "SELECT COUNT(*) as total FROM invoices";
   const params = [];
   if (status) {
-    q += " WHERE status = ?";
+    q += " WHERE i.status = ?";
     countQ += " WHERE status = ?";
     params.push(status);
   }
-  q += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+  q += " ORDER BY i.created_at DESC LIMIT ? OFFSET ?";
   const [invoices, total] = await Promise.all([
     query(q, [...params, String(limit), String(offset)]),
     get(countQ, params)
@@ -10738,7 +10865,7 @@ var getInvoice = createRoute({
 });
 app.openapi(getInvoice, async (c) => {
   const id = c.req.valid("param").id;
-  const invoice = await get("SELECT * FROM invoices WHERE id = ?", [id]);
+  const invoice = await get("SELECT i.*, c.name as client_name, c.phone as client_phone FROM invoices i LEFT JOIN clients c ON i.client_id = c.id WHERE i.id = ?", [id]);
   if (!invoice) return c.json({ error: "Invoice not found" }, 404);
   const items = await query("SELECT * FROM invoice_items WHERE invoice_id = ?", [id]);
   return c.json({ invoice: { ...invoice, items } }, 200);
@@ -10763,8 +10890,11 @@ app.openapi(createInvoice, async (c) => {
   const data = c.req.valid("json");
   const identifier = await nextInvoiceIdentifier();
   const result = await run(
-    `INSERT INTO invoices (identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO invoices (
+      identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method,
+      split_cash, split_upi, split_card, coupon_code, coupon_discount,
+      loyalty_points_redeemed, loyalty_discount, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       identifier,
       data.appointment_id ? String(data.appointment_id) : null,
@@ -10774,6 +10904,13 @@ app.openapi(createInvoice, async (c) => {
       String(data.tax),
       String(data.total),
       data.payment_method,
+      String(data.split_cash || 0),
+      String(data.split_upi || 0),
+      String(data.split_card || 0),
+      data.coupon_code || "",
+      String(data.coupon_discount || 0),
+      String(data.loyalty_points_redeemed || 0),
+      String(data.loyalty_discount || 0),
       data.status
     ]
   );
@@ -10794,7 +10931,77 @@ app.openapi(createInvoice, async (c) => {
       itemParams
     );
   }
-  const newInvoice = await get("SELECT * FROM invoices WHERE id = ?", [String(invoiceId)]);
+  if (data.coupon_code) {
+    await run("UPDATE coupons SET times_used = times_used + 1 WHERE code = ?", [data.coupon_code]);
+  }
+  const loyaltyRedeemed = data.loyalty_points_redeemed || 0;
+  const loyaltyEarned = data.status === "paid" ? Math.floor(data.total / 10) : 0;
+  if (loyaltyRedeemed > 0) {
+    await run(
+      "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'redeemed_pos', ?, ?)",
+      [String(data.client_id), String(-loyaltyRedeemed), String(invoiceId), `Redeemed on Invoice #${identifier}`]
+    );
+  }
+  if (loyaltyEarned > 0) {
+    await run(
+      "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'earned_invoice', ?, ?)",
+      [String(data.client_id), String(loyaltyEarned), String(invoiceId), `Earned from Invoice #${identifier}`]
+    );
+  }
+  if (data.status === "paid") {
+    await run(
+      `UPDATE clients SET 
+         loyalty_points = MAX(0, COALESCE(loyalty_points, 0) - ? + ?),
+         total_spent = COALESCE(total_spent, 0) + ?,
+         total_visits = COALESCE(total_visits, 0) + 1,
+         last_visit_date = date('now'),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+      [String(loyaltyRedeemed), String(loyaltyEarned), String(data.total), String(data.client_id)]
+    );
+  } else if (loyaltyRedeemed > 0) {
+    await run(
+      "UPDATE clients SET loyalty_points = MAX(0, COALESCE(loyalty_points, 0) - ?), updated_at = datetime('now') WHERE id = ?",
+      [String(loyaltyRedeemed), String(data.client_id)]
+    );
+  }
+  let staffId = null;
+  if (data.appointment_id) {
+    const apt = await get("SELECT staff_id FROM appointments WHERE id = ?", [String(data.appointment_id)]);
+    staffId = apt?.staff_id || null;
+  }
+  if (!staffId) {
+    const defaultStaff = await get("SELECT id FROM staff WHERE active = 1 ORDER BY id ASC LIMIT 1");
+    staffId = defaultStaff?.id || null;
+  }
+  if (staffId && data.items && data.items.length > 0) {
+    const staffRow = await get("SELECT id, commission_percent FROM staff WHERE id = ?", [String(staffId)]);
+    if (staffRow) {
+      const commRate = staffRow.commission_percent ?? 10;
+      for (const item of data.items) {
+        const commEarned = Math.round(item.total * commRate / 100 * 100) / 100;
+        await run(
+          `INSERT INTO staff_commissions (staff_id, invoice_id, item_name, item_type, item_price, commission_percent, commission_amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [String(staffId), String(invoiceId), item.name, item.item_type, String(item.total), String(commRate), String(commEarned)]
+        );
+      }
+    }
+  }
+  const activePlan = await get(
+    "SELECT id, services_total, services_used FROM client_memberships WHERE client_id = ? AND status = 'active' AND end_date >= date('now') ORDER BY end_date ASC LIMIT 1",
+    [String(data.client_id)]
+  );
+  if (activePlan && data.items) {
+    const serviceItemsCount = data.items.filter((i) => i.item_type === "service").length;
+    if (serviceItemsCount > 0) {
+      await run(
+        "UPDATE client_memberships SET services_used = MIN(services_total, services_used + ?) WHERE id = ?",
+        [String(serviceItemsCount), String(activePlan.id)]
+      );
+    }
+  }
+  const newInvoice = await get("SELECT i.*, c.name as client_name, c.phone as client_phone FROM invoices i LEFT JOIN clients c ON i.client_id = c.id WHERE i.id = ?", [String(invoiceId)]);
   const newItems = await query("SELECT * FROM invoice_items WHERE invoice_id = ?", [String(invoiceId)]);
   try {
     const waSettings = await getWhatsAppSettings();
@@ -10820,10 +11027,31 @@ var updateInvoiceStatus = createRoute({
 app.openapi(updateInvoiceStatus, async (c) => {
   const id = c.req.valid("param").id;
   const { status, payment_method } = c.req.valid("json");
+  const existing = await get("SELECT * FROM invoices WHERE id = ?", [id]);
+  if (!existing) return c.json({ ok: false }, 404);
   if (payment_method) {
     await run("UPDATE invoices SET status = ?, payment_method = ?, updated_at = datetime('now') WHERE id = ?", [status, payment_method, id]);
   } else {
     await run("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
+  }
+  if (existing.status !== "paid" && status === "paid") {
+    const loyaltyEarned = Math.floor(existing.total / 10);
+    if (loyaltyEarned > 0) {
+      await run(
+        "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'earned_invoice', ?, ?)",
+        [String(existing.client_id), String(loyaltyEarned), String(id), `Earned from Invoice #${existing.identifier}`]
+      );
+    }
+    await run(
+      `UPDATE clients SET 
+         loyalty_points = COALESCE(loyalty_points, 0) + ?,
+         total_spent = COALESCE(total_spent, 0) + ?,
+         total_visits = COALESCE(total_visits, 0) + 1,
+         last_visit_date = date('now'),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+      [String(loyaltyEarned), String(existing.total), String(existing.client_id)]
+    );
   }
   try {
     const waSettings = await getWhatsAppSettings();
@@ -12031,6 +12259,543 @@ app.openapi(sendReceiptWhatsAppEndpoint, async (c) => {
     return c.json({ error: "Invoice not found or client has no phone number" }, 404);
   }
   return c.json({ result }, 200);
+});
+var getGrowthInsightsEndpoint = createRoute({
+  method: "get",
+  path: "/api/growth/insights",
+  responses: {
+    200: {
+      description: "Growth insights, inactive client recovery, slow hours, and stylist leaderboard",
+      content: { "application/json": { schema: GrowthInsightsSchema } }
+    }
+  }
+});
+app.openapi(getGrowthInsightsEndpoint, async (c) => {
+  const allClients = await query(
+    "SELECT id, name, phone, email, loyalty_points, total_spent, total_visits, last_visit_date, created_at FROM clients ORDER BY COALESCE(last_visit_date, created_at) ASC"
+  );
+  const now = /* @__PURE__ */ new Date();
+  const inactive_clients = allClients.filter((client) => {
+    const lastDate = client.last_visit_date ? new Date(client.last_visit_date) : new Date(client.created_at);
+    const diffDays = Math.floor((now.getTime() - lastDate.getTime()) / (1e3 * 60 * 60 * 24));
+    return diffDays >= 45 || client.total_visits === 0;
+  }).slice(0, 15).map((client) => {
+    const lastDate = client.last_visit_date ? new Date(client.last_visit_date) : new Date(client.created_at);
+    const days = Math.max(1, Math.floor((now.getTime() - lastDate.getTime()) / (1e3 * 60 * 60 * 24)));
+    const discount = "\u20B9200 OFF on your next hair & spa service";
+    const message = `Hi ${client.name}! We miss you at OpenSalon. It has been ${days} days since your last visit. Treat yourself to \u20B9200 OFF your next service with code COMEBACK200! Reply to book or reserve online.`;
+    return {
+      id: client.id,
+      name: client.name,
+      phone: client.phone || "",
+      days_since_last_visit: days,
+      last_visit_date: client.last_visit_date || client.created_at?.split("T")[0] || "N/A",
+      total_spent: client.total_spent || 0,
+      total_visits: client.total_visits || 0,
+      suggested_discount: discount,
+      suggested_message: message,
+      whatsapp_url: createWaMeUrl(client.phone || "", message)
+    };
+  });
+  const slow_hours = [
+    {
+      day_name: "Monday",
+      slot_label: "Monday 1:00 PM - 5:00 PM",
+      historical_bookings: 2,
+      recommended_deal: "50% OFF Hair Wash & Styling",
+      promo_code: "MONDAY50",
+      estimated_lift: "+4 to 6 bookings/day"
+    },
+    {
+      day_name: "Tuesday",
+      slot_label: "Tuesday 10:00 AM - 2:00 PM",
+      historical_bookings: 3,
+      recommended_deal: "Free Express Manicure with Color",
+      promo_code: "TUESDEAL",
+      estimated_lift: "+3 to 5 bookings/day"
+    },
+    {
+      day_name: "Wednesday",
+      slot_label: "Wednesday 2:00 PM - 6:00 PM",
+      historical_bookings: 4,
+      recommended_deal: "Flat \u20B9150 OFF on orders > \u20B9500",
+      promo_code: "MIDWEEK",
+      estimated_lift: "+4 bookings/day"
+    },
+    {
+      day_name: "Thursday",
+      slot_label: "Thursday 11:00 AM - 3:00 PM",
+      historical_bookings: 5,
+      recommended_deal: "20% OFF Facial & Glow Treatments",
+      promo_code: "GLOW20",
+      estimated_lift: "+3 bookings/day"
+    }
+  ];
+  const stylistRows = await query(`
+    SELECT 
+      s.id as staff_id, s.name as staff_name, s.title as staff_title, s.color as staff_color,
+      COUNT(DISTINCT a.id) as completed_appointments,
+      COALESCE(SUM(CASE WHEN sc.item_type = 'service' THEN sc.item_price ELSE 0 END), 0) as service_revenue,
+      COALESCE(SUM(CASE WHEN sc.item_type = 'product' THEN sc.item_price ELSE 0 END), 0) as product_revenue,
+      COALESCE(SUM(sc.item_price), 0) as total_sales,
+      COALESCE(SUM(sc.commission_amount), 0) as commission_earned
+    FROM staff s
+    LEFT JOIN appointments a ON a.staff_id = s.id AND a.status = 'completed'
+    LEFT JOIN staff_commissions sc ON sc.staff_id = s.id
+    WHERE s.active = 1
+    GROUP BY s.id
+    ORDER BY total_sales DESC, completed_appointments DESC
+  `);
+  const stylist_leaderboard = stylistRows.map((s, idx) => ({
+    staff_id: s.staff_id,
+    staff_name: s.staff_name,
+    staff_title: s.staff_title || "Stylist",
+    staff_color: s.staff_color || "#7c3aed",
+    completed_appointments: s.completed_appointments || 0,
+    service_revenue: s.service_revenue || 0,
+    product_revenue: s.product_revenue || 0,
+    total_sales: s.total_sales || 0,
+    commission_earned: s.commission_earned || 0,
+    rank: idx + 1
+  }));
+  const membersCount = await get("SELECT COUNT(*) as count FROM client_memberships WHERE status = 'active'");
+  const loyaltySum = await get("SELECT COALESCE(SUM(loyalty_points), 0) as total FROM clients");
+  const repeatStats = await get(
+    "SELECT COUNT(*) as total, SUM(CASE WHEN total_visits > 1 THEN 1 ELSE 0 END) as repeats FROM clients"
+  );
+  const invoiceAvg = await get("SELECT COALESCE(AVG(total), 0) as avg_ticket FROM invoices WHERE status = 'paid'");
+  const totalClients = repeatStats?.total || 1;
+  const repeatClients = repeatStats?.repeats || 0;
+  const repeat_client_rate = Math.round(repeatClients / totalClients * 100);
+  return c.json({
+    inactive_clients,
+    slow_hours,
+    stylist_leaderboard,
+    total_members: membersCount?.count || 0,
+    loyalty_points_in_circulation: loyaltySum?.total || 0,
+    repeat_client_rate,
+    avg_ticket_size: Math.round(invoiceAvg?.avg_ticket || 0)
+  }, 200);
+});
+var listMemberships = createRoute({
+  method: "get",
+  path: "/api/memberships",
+  responses: {
+    200: {
+      description: "List all membership packages",
+      content: { "application/json": { schema: external_exports.object({ memberships: external_exports.array(MembershipSchema) }) } }
+    }
+  }
+});
+app.openapi(listMemberships, async (c) => {
+  const rows = await query("SELECT * FROM memberships ORDER BY id ASC");
+  return c.json({ memberships: rows }, 200);
+});
+var createMembership = createRoute({
+  method: "post",
+  path: "/api/memberships",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: MembershipSchema.omit({ id: true, created_at: true })
+        }
+      }
+    }
+  },
+  responses: {
+    201: {
+      description: "Created membership",
+      content: { "application/json": { schema: external_exports.object({ membership: MembershipSchema }) } }
+    }
+  }
+});
+app.openapi(createMembership, async (c) => {
+  const data = c.req.valid("json");
+  const result = await run(
+    `INSERT INTO memberships (
+      name, description, price, duration_days, service_discount_percent,
+      product_discount_percent, included_services_count, bonus_loyalty_points, active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      data.name,
+      data.description || "",
+      String(data.price),
+      String(data.duration_days),
+      String(data.service_discount_percent),
+      String(data.product_discount_percent),
+      String(data.included_services_count),
+      String(data.bonus_loyalty_points),
+      String(data.active)
+    ]
+  );
+  const membership = await get("SELECT * FROM memberships WHERE id = ?", [result.lastInsertRowid]);
+  return c.json({ membership }, 201);
+});
+var updateMembership = createRoute({
+  method: "put",
+  path: "/api/memberships/{id}",
+  request: {
+    params: IdParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: MembershipSchema.omit({ id: true, created_at: true }).partial()
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(updateMembership, async (c) => {
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const sets = [];
+  const params = [];
+  for (const [key, val] of Object.entries(body)) {
+    if (val !== void 0) {
+      sets.push(`${key} = ?`);
+      params.push(String(val));
+    }
+  }
+  if (sets.length > 0) {
+    await run(`UPDATE memberships SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+  }
+  return c.json({ ok: true }, 200);
+});
+var deleteMembership = createRoute({
+  method: "delete",
+  path: "/api/memberships/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(deleteMembership, async (c) => {
+  const { id } = c.req.valid("param");
+  await run("DELETE FROM memberships WHERE id = ?", [id]);
+  return c.json({ ok: true }, 200);
+});
+var listClientMemberships = createRoute({
+  method: "get",
+  path: "/api/client-memberships",
+  responses: {
+    200: {
+      description: "List enrolled client memberships",
+      content: { "application/json": { schema: external_exports.object({ client_memberships: external_exports.array(ClientMembershipSchema) }) } }
+    }
+  }
+});
+app.openapi(listClientMemberships, async (c) => {
+  const rows = await query(`
+    SELECT cm.*, c.name as client_name, c.phone as client_phone, m.name as membership_name
+    FROM client_memberships cm
+    JOIN clients c ON cm.client_id = c.id
+    JOIN memberships m ON cm.membership_id = m.id
+    ORDER BY cm.created_at DESC
+  `);
+  return c.json({ client_memberships: rows }, 200);
+});
+var createClientMembership = createRoute({
+  method: "post",
+  path: "/api/client-memberships",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            client_id: external_exports.number().int(),
+            membership_id: external_exports.number().int()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    201: {
+      description: "Client membership assigned",
+      content: { "application/json": { schema: external_exports.object({ client_membership: ClientMembershipSchema }) } }
+    }
+  }
+});
+app.openapi(createClientMembership, async (c) => {
+  const { client_id, membership_id } = c.req.valid("json");
+  const membership = await get("SELECT * FROM memberships WHERE id = ?", [String(membership_id)]);
+  if (!membership) return c.json({ error: "Membership package not found" }, 404);
+  const startDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const endDateObj = /* @__PURE__ */ new Date();
+  endDateObj.setDate(endDateObj.getDate() + (membership.duration_days || 365));
+  const endDate = endDateObj.toISOString().split("T")[0];
+  const result = await run(
+    `INSERT INTO client_memberships (client_id, membership_id, start_date, end_date, services_total, services_used, status)
+     VALUES (?, ?, ?, ?, ?, 0, 'active')`,
+    [
+      String(client_id),
+      String(membership_id),
+      startDate,
+      endDate,
+      String(membership.included_services_count || 12)
+    ]
+  );
+  const cmId = result.lastInsertRowid;
+  if (membership.bonus_loyalty_points > 0) {
+    await run(
+      "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'membership_bonus', ?, ?)",
+      [String(client_id), String(membership.bonus_loyalty_points), String(cmId), `Bonus points for purchasing ${membership.name}`]
+    );
+    await run(
+      "UPDATE clients SET loyalty_points = COALESCE(loyalty_points, 0) + ? WHERE id = ?",
+      [String(membership.bonus_loyalty_points), String(client_id)]
+    );
+  }
+  const clientMembership = await get(`
+    SELECT cm.*, c.name as client_name, c.phone as client_phone, m.name as membership_name
+    FROM client_memberships cm
+    JOIN clients c ON cm.client_id = c.id
+    JOIN memberships m ON cm.membership_id = m.id
+    WHERE cm.id = ?
+  `, [cmId]);
+  return c.json({ client_membership: clientMembership }, 201);
+});
+var listLoyaltyTransactions = createRoute({
+  method: "get",
+  path: "/api/loyalty/transactions",
+  responses: {
+    200: {
+      description: "List recent loyalty transactions",
+      content: { "application/json": { schema: external_exports.object({ transactions: external_exports.array(LoyaltyTransactionSchema) }) } }
+    }
+  }
+});
+app.openapi(listLoyaltyTransactions, async (c) => {
+  const rows = await query(`
+    SELECT lt.*, c.name as client_name
+    FROM loyalty_transactions lt
+    JOIN clients c ON lt.client_id = c.id
+    ORDER BY lt.created_at DESC
+    LIMIT 100
+  `);
+  return c.json({ transactions: rows }, 200);
+});
+var adjustLoyaltyPoints = createRoute({
+  method: "post",
+  path: "/api/loyalty/adjust",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            client_id: external_exports.number().int(),
+            points: external_exports.number().int(),
+            notes: external_exports.string().optional()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Points adjusted", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(adjustLoyaltyPoints, async (c) => {
+  const { client_id, points, notes } = c.req.valid("json");
+  await run(
+    "INSERT INTO loyalty_transactions (client_id, points, transaction_type, notes) VALUES (?, ?, 'adjustment', ?)",
+    [String(client_id), String(points), notes || "Manual points adjustment"]
+  );
+  await run(
+    "UPDATE clients SET loyalty_points = MAX(0, COALESCE(loyalty_points, 0) + ?) WHERE id = ?",
+    [String(points), String(client_id)]
+  );
+  return c.json({ ok: true }, 200);
+});
+var listCoupons = createRoute({
+  method: "get",
+  path: "/api/coupons",
+  responses: {
+    200: {
+      description: "List coupons",
+      content: { "application/json": { schema: external_exports.object({ coupons: external_exports.array(CouponSchema) }) } }
+    }
+  }
+});
+app.openapi(listCoupons, async (c) => {
+  const rows = await query("SELECT * FROM coupons ORDER BY created_at DESC");
+  return c.json({ coupons: rows }, 200);
+});
+var createCoupon = createRoute({
+  method: "post",
+  path: "/api/coupons",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: CouponSchema.omit({ id: true, created_at: true, times_used: true })
+        }
+      }
+    }
+  },
+  responses: {
+    201: {
+      description: "Coupon created",
+      content: { "application/json": { schema: external_exports.object({ coupon: CouponSchema }) } }
+    }
+  }
+});
+app.openapi(createCoupon, async (c) => {
+  const data = c.req.valid("json");
+  const result = await run(
+    `INSERT INTO coupons (code, description, discount_type, discount_value, min_order_amount, valid_until, is_active, usage_limit, times_used)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    [
+      data.code.toUpperCase().trim(),
+      data.description || "",
+      data.discount_type,
+      String(data.discount_value),
+      String(data.min_order_amount || 0),
+      data.valid_until || "",
+      String(data.is_active ?? 1),
+      String(data.usage_limit ?? 100)
+    ]
+  );
+  const coupon = await get("SELECT * FROM coupons WHERE id = ?", [result.lastInsertRowid]);
+  return c.json({ coupon }, 201);
+});
+var updateCoupon = createRoute({
+  method: "put",
+  path: "/api/coupons/{id}",
+  request: {
+    params: IdParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: CouponSchema.omit({ id: true, created_at: true }).partial()
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(updateCoupon, async (c) => {
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const sets = [];
+  const params = [];
+  for (const [key, val] of Object.entries(body)) {
+    if (val !== void 0) {
+      sets.push(`${key} = ?`);
+      params.push(key === "code" ? String(val).toUpperCase().trim() : String(val));
+    }
+  }
+  if (sets.length > 0) {
+    await run(`UPDATE coupons SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+  }
+  return c.json({ ok: true }, 200);
+});
+var deleteCoupon = createRoute({
+  method: "delete",
+  path: "/api/coupons/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(deleteCoupon, async (c) => {
+  const { id } = c.req.valid("param");
+  await run("DELETE FROM coupons WHERE id = ?", [id]);
+  return c.json({ ok: true }, 200);
+});
+var validateCoupon = createRoute({
+  method: "post",
+  path: "/api/coupons/validate",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            code: external_exports.string(),
+            order_amount: external_exports.number()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Validation result",
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            valid: external_exports.boolean(),
+            discount: external_exports.number().optional(),
+            message: external_exports.string().optional(),
+            coupon: CouponSchema.optional()
+          })
+        }
+      }
+    }
+  }
+});
+app.openapi(validateCoupon, async (c) => {
+  const { code, order_amount } = c.req.valid("json");
+  const coupon = await get("SELECT * FROM coupons WHERE code = ? COLLATE NOCASE", [code.trim()]);
+  if (!coupon) {
+    return c.json({ valid: false, message: "Invalid coupon code" }, 200);
+  }
+  if (coupon.is_active === 0) {
+    return c.json({ valid: false, message: "This coupon is currently inactive" }, 200);
+  }
+  if (coupon.valid_until && new Date(coupon.valid_until) < /* @__PURE__ */ new Date()) {
+    return c.json({ valid: false, message: "This coupon has expired" }, 200);
+  }
+  if (coupon.usage_limit && coupon.times_used >= coupon.usage_limit) {
+    return c.json({ valid: false, message: "Coupon usage limit reached" }, 200);
+  }
+  if (coupon.min_order_amount && order_amount < coupon.min_order_amount) {
+    return c.json({ valid: false, message: `Minimum order amount of \u20B9${coupon.min_order_amount} required` }, 200);
+  }
+  let discount = 0;
+  if (coupon.discount_type === "percent") {
+    discount = Math.round(order_amount * coupon.discount_value / 100 * 100) / 100;
+  } else {
+    discount = Math.min(order_amount, coupon.discount_value);
+  }
+  return c.json({ valid: true, discount, coupon }, 200);
+});
+var listStaffCommissions = createRoute({
+  method: "get",
+  path: "/api/staff-commissions",
+  request: {
+    query: external_exports.object({
+      staff_id: external_exports.string().optional()
+    })
+  },
+  responses: {
+    200: {
+      description: "List staff commissions",
+      content: { "application/json": { schema: external_exports.object({ commissions: external_exports.array(StaffCommissionSchema) }) } }
+    }
+  }
+});
+app.openapi(listStaffCommissions, async (c) => {
+  const { staff_id } = c.req.valid("query");
+  let q = `
+    SELECT sc.*, s.name as staff_name
+    FROM staff_commissions sc
+    JOIN staff s ON sc.staff_id = s.id
+  `;
+  const params = [];
+  if (staff_id) {
+    q += " WHERE sc.staff_id = ?";
+    params.push(staff_id);
+  }
+  q += " ORDER BY sc.created_at DESC LIMIT 100";
+  const rows = await query(q, params);
+  return c.json({ commissions: rows }, 200);
 });
 var server_default = app;
 

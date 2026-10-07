@@ -1,7 +1,7 @@
 import { AppNav, embedded } from "@clawnify/app/client";
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../context";
-import { Scissors, Menu, LayoutDashboard, CalendarDays, Clock, Users, UserCog, Sparkles, Package, CreditCard, ReceiptText, MessageCircle } from "lucide-preact";
+import { Scissors, Menu, LayoutDashboard, CalendarDays, Clock, Users, UserCog, Sparkles, Package, CreditCard, ReceiptText, MessageCircle, TrendingUp, Crown } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -11,9 +11,11 @@ import type { View } from "../types";
 
 const navItems: { view: View; path: string; label: string; icon: typeof LayoutDashboard }[] = [
   { view: "dashboard", path: "/", label: "Dashboard", icon: LayoutDashboard },
+  { view: "growth", path: "/growth", label: "Growth Engine", icon: TrendingUp },
   { view: "calendar", path: "/calendar", label: "Calendar", icon: CalendarDays },
   { view: "appointments", path: "/appointments", label: "Appointments", icon: Clock },
   { view: "clients", path: "/clients", label: "Clients", icon: Users },
+  { view: "memberships", path: "/memberships", label: "Memberships & Loyalty", icon: Crown },
   { view: "staff", path: "/staff", label: "Staff", icon: UserCog },
   { view: "services", path: "/services", label: "Services", icon: Sparkles },
   { view: "products", path: "/products", label: "Products", icon: Package },

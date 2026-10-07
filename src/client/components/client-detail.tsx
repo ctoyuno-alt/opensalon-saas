@@ -95,7 +95,31 @@ export function ClientDetail() {
                   </div>
                 )}
                 {client.notes && <p className="text-sm text-muted-foreground">{client.notes}</p>}
-                <p className="text-xs text-muted-foreground">Client since {new Date(client.created_at).toLocaleDateString()}</p>
+                
+                <div className="pt-2 border-t space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Loyalty Wallet:</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold font-mono bg-amber-50 text-amber-700 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300">
+                      ✨ {client.loyalty_points || 0} pts
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Lifetime Visits:</span>
+                    <span className="font-semibold">{client.total_visits || 0} visits</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Lifetime Spend:</span>
+                    <span className="font-semibold text-emerald-600">₹{(client.total_spent || 0).toLocaleString()}</span>
+                  </div>
+                  {client.last_visit_date ? (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Last Visit:</span>
+                      <span className="font-medium text-foreground">{client.last_visit_date}</span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <p className="text-xs text-muted-foreground pt-1">Client since {new Date(client.created_at).toLocaleDateString()}</p>
               </>
             )}
           </CardContent>

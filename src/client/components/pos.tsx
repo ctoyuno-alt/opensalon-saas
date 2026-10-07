@@ -1,5 +1,6 @@
-import { useState, useMemo } from "preact/hooks";
+import { useState, useMemo, useEffect } from "preact/hooks";
 import { useApp } from "../context";
+import { api } from "../api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,8 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Receipt, Plus, Trash2, CreditCard, History, MessageCircle } from "lucide-preact";
-import type { InvoiceItem } from "../types";
+import { Badge } from "@/components/ui/badge";
+import {
+  Receipt, Plus, Trash2, CreditCard, History, MessageCircle,
+  Tag, Sparkles, Check, AlertCircle, RefreshCw, Crown
+} from "lucide-preact";
+import type { InvoiceItem, Coupon, ClientMembership } from "../types";
 import { Pagination } from "./pagination";
 
 export function PosBilling() {
@@ -21,16 +26,60 @@ export function PosBilling() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Split payment state
+  const [splitCash, setSplitCash] = useState(0);
+  const [splitUpi, setSplitUpi] = useState(0);
+  const [splitCard, setSplitCard] = useState(0);
+
+  // Coupon state
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponMessage, setCouponMessage] = useState<string | null>(null);
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+
+  // Loyalty points state
+  const [redeemLoyalty, setRedeemLoyalty] = useState(false);
+  const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0);
+
+  // Client membership lookup
+  const [activePlan, setActivePlan] = useState<ClientMembership | null>(null);
+
+  const selectedClient = useMemo(() => {
+    return clients.find((c) => String(c.id) === clientId);
+  }, [clients, clientId]);
+
+  useEffect(() => {
+    if (clientId) {
+      api<{ client_memberships: ClientMembership[] }>("GET", "/api/client-memberships")
+        .then((res) => {
+          const match = res.client_memberships.find(
+            (cm) => String(cm.client_id) === clientId && cm.status === "active"
+          );
+          setActivePlan(match || null);
+        })
+        .catch(() => setActivePlan(null));
+      
+      // Auto-set redeem loyalty points
+      if (selectedClient && (selectedClient.loyalty_points || 0) > 0) {
+        setLoyaltyPointsToRedeem(Math.min(selectedClient.loyalty_points || 0, 500));
+      }
+    } else {
+      setActivePlan(null);
+      setRedeemLoyalty(false);
+    }
+  }, [clientId, selectedClient]);
+
   const addService = (val: string) => {
-    const s = services.find(x => String(x.id) === val);
+    const s = services.find((x) => String(x.id) === val);
     if (!s) return;
-    setItems(prev => [...prev, { item_type: "service", item_id: s.id, name: s.name, quantity: 1, price: s.price, total: s.price }]);
+    setItems((prev) => [...prev, { item_type: "service", item_id: s.id, name: s.name, quantity: 1, price: s.price, total: s.price }]);
   };
 
   const addProduct = (val: string) => {
-    const p = products.find(x => String(x.id) === val);
+    const p = products.find((x) => String(x.id) === val);
     if (!p) return;
-    setItems(prev => [...prev, { item_type: "product", item_id: p.id, name: p.name, quantity: 1, price: p.price, total: p.price }]);
+    setItems((prev) => [...prev, { item_type: "product", item_id: p.id, name: p.name, quantity: 1, price: p.price, total: p.price }]);
   };
 
   const removeItem = (index: number) => {
@@ -47,28 +96,102 @@ export function PosBilling() {
   };
 
   const subtotal = useMemo(() => items.reduce((acc, item) => acc + item.total, 0), [items]);
-  const tax = useMemo(() => (subtotal - discount) * (taxPercent / 100), [subtotal, discount, taxPercent]);
-  const total = useMemo(() => subtotal - discount + tax, [subtotal, discount, tax]);
+  
+  // 10 loyalty points = ₹1 discount
+  const loyaltyDiscount = useMemo(() => {
+    if (!redeemLoyalty) return 0;
+    return Math.floor(loyaltyPointsToRedeem / 10);
+  }, [redeemLoyalty, loyaltyPointsToRedeem]);
+
+  const totalDiscount = useMemo(() => {
+    return Math.min(subtotal, discount + couponDiscount + loyaltyDiscount);
+  }, [subtotal, discount, couponDiscount, loyaltyDiscount]);
+
+  const tax = useMemo(() => Math.round((subtotal - totalDiscount) * (taxPercent / 100) * 100) / 100, [subtotal, totalDiscount, taxPercent]);
+  const total = useMemo(() => Math.max(0, Math.round((subtotal - totalDiscount + tax) * 100) / 100), [subtotal, totalDiscount, tax]);
+
+  // Handle coupon validation
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setIsValidatingCoupon(true);
+    setCouponMessage(null);
+    try {
+      const res = await api<{ valid: boolean; discount?: number; message?: string; coupon?: Coupon }>(
+        "POST",
+        "/api/coupons/validate",
+        { code: couponCode.trim(), order_amount: subtotal }
+      );
+      if (res.valid && res.coupon && res.discount !== undefined) {
+        setAppliedCoupon(res.coupon);
+        setCouponDiscount(res.discount);
+        setCouponMessage(`Coupon ${res.coupon.code} applied: ₹${res.discount} OFF`);
+      } else {
+        setAppliedCoupon(null);
+        setCouponDiscount(0);
+        setCouponMessage(res.message || "Invalid coupon code");
+      }
+    } catch (err: any) {
+      setCouponMessage("Failed to validate coupon: " + err.message);
+    } finally {
+      setIsValidatingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponDiscount(0);
+    setCouponCode("");
+    setCouponMessage(null);
+  };
+
+  const handleAutoFillSplit = () => {
+    const remaining = Math.max(0, total - splitCash - splitUpi);
+    setSplitCard(remaining);
+  };
 
   const handleCheckout = async () => {
     if (!clientId) return alert("Please select a client.");
     if (items.length === 0) return alert("Please add at least one item to the invoice.");
+
+    if (paymentMethod === "split") {
+      const splitTotal = splitCash + splitUpi + splitCard;
+      if (Math.abs(splitTotal - total) > 0.05) {
+        return alert(`Split payments (₹${splitTotal}) must exactly equal invoice total (₹${total}).`);
+      }
+    }
     
     setIsSubmitting(true);
     try {
       await createInvoice({
         appointment_id: null,
         client_id: parseInt(clientId, 10),
-        subtotal, discount, tax, total,
+        subtotal,
+        discount: totalDiscount,
+        tax,
+        total,
         payment_method: paymentMethod,
-        status: "paid", // Auto mark as paid for POS
+        split_cash: paymentMethod === "split" ? splitCash : paymentMethod === "cash" ? total : 0,
+        split_upi: paymentMethod === "split" ? splitUpi : paymentMethod === "upi" ? total : 0,
+        split_card: paymentMethod === "split" ? splitCard : paymentMethod === "card" ? total : 0,
+        coupon_code: appliedCoupon ? appliedCoupon.code : "",
+        coupon_discount: couponDiscount,
+        loyalty_points_redeemed: redeemLoyalty ? loyaltyPointsToRedeem : 0,
+        loyalty_discount: loyaltyDiscount,
+        status: "paid",
         items,
       });
-      alert("Invoice created successfully!");
+      alert("Invoice processed and paid successfully!");
       // Reset form
       setClientId("");
       setItems([]);
       setDiscount(0);
+      setAppliedCoupon(null);
+      setCouponDiscount(0);
+      setCouponCode("");
+      setRedeemLoyalty(false);
+      setSplitCash(0);
+      setSplitUpi(0);
+      setSplitCard(0);
     } catch (err: any) {
       alert(err.message || (typeof err === "string" ? err : JSON.stringify(err)));
     } finally {
@@ -86,12 +209,15 @@ export function PosBilling() {
   };
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
           <Receipt className="h-6 w-6 text-muted-foreground" />
-          Billing & POS
+          Billing &amp; Smart POS
         </h1>
+        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+          Split Payments • Coupons • Loyalty Active
+        </Badge>
       </div>
 
       <Tabs defaultValue="new" className="w-full">
@@ -101,23 +227,27 @@ export function PosBilling() {
         </TabsList>
         
         <TabsContent value="new" className="mt-0">
-          <div className="grid gap-6 md:grid-cols-[1fr_350px]">
+          <div className="grid gap-6 md:grid-cols-[1fr_390px]">
             {/* Left Side: Items Selection */}
             <div className="flex flex-col gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Add Items</CardTitle>
+                  <CardTitle>Add Items to Bill</CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
                   <div className="flex items-end gap-2">
                     <div className="flex-1 space-y-2">
-                      <Label>Service</Label>
+                      <Label>Add Salon Service</Label>
                       <Select value="" onValueChange={addService}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a service to add..." />
+                          <SelectValue placeholder="Select a service..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {services.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} - ${s.price.toFixed(2)}</SelectItem>)}
+                          {services.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              {s.name} — ₹{s.price.toFixed(2)} ({s.duration} mins)
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -125,13 +255,17 @@ export function PosBilling() {
 
                   <div className="flex items-end gap-2">
                     <div className="flex-1 space-y-2">
-                      <Label>Product</Label>
+                      <Label>Add Retail Product</Label>
                       <Select value="" onValueChange={addProduct}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a product to add..." />
+                          <SelectValue placeholder="Select retail product..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {products.map(p => <SelectItem key={p.id} value={String(p.id)}>{p.name} - ${p.price.toFixed(2)}</SelectItem>)}
+                          {products.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.name} — ₹{p.price.toFixed(2)} ({p.stock} in stock)
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -141,21 +275,28 @@ export function PosBilling() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Current Invoice</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Current Order Items</CardTitle>
+                    <Badge variant="secondary">{items.length} items</Badge>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {items.length === 0 ? (
-                    <div className="text-center text-sm text-muted-foreground py-8">No items added yet.</div>
+                    <div className="text-center text-sm text-muted-foreground py-8">
+                      No items added yet. Choose a service or retail product above.
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       {items.map((item, index) => (
                         <div key={index} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
                           <div>
-                            <div className="font-medium">{item.name}</div>
-                            <div className="text-xs text-muted-foreground">{item.item_type === "service" ? "Service" : "Product"} - ${item.price.toFixed(2)} x {item.quantity}</div>
+                            <div className="font-medium text-sm">{item.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.item_type === "service" ? "Service" : "Product"} • ₹{item.price.toFixed(2)} x {item.quantity}
+                            </div>
                           </div>
                           <div className="flex items-center gap-4">
-                            <div className="font-semibold">${item.total.toFixed(2)}</div>
+                            <div className="font-semibold text-sm">₹{item.total.toFixed(2)}</div>
                             <Button variant="ghost" size="icon" onClick={() => removeItem(index)} className="h-8 w-8 text-destructive">
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -171,64 +312,221 @@ export function PosBilling() {
             {/* Right Side: Checkout Summary */}
             <div className="flex flex-col gap-6">
               <Card>
-                <CardHeader>
-                  <CardTitle>Checkout Details</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle>Checkout &amp; Discounts</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Client Selector */}
                   <div className="space-y-2">
-                    <Label>Client</Label>
+                    <Label>Select Client</Label>
                     <Select value={clientId} onValueChange={setClientId}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select client..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {clients.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                        {clients.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.name} {c.phone ? `(${c.phone})` : ""}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+
+                    {/* Client Membership / Loyalty Info Badge */}
+                    {selectedClient && (
+                      <div className="p-2.5 rounded-md bg-muted/40 border text-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Loyalty Wallet:</span>
+                          <strong className="text-amber-600 font-mono">
+                            {selectedClient.loyalty_points || 0} pts (≈ ₹{Math.floor((selectedClient.loyalty_points || 0) / 10)})
+                          </strong>
+                        </div>
+                        {activePlan ? (
+                          <div className="flex items-center justify-between text-emerald-600 font-semibold">
+                            <span className="flex items-center gap-1">
+                              <Crown className="h-3 w-3" /> {activePlan.membership_name}
+                            </span>
+                            <span>{activePlan.services_total - activePlan.services_used} svcs left</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
-                  
-                  <div className="space-y-2 pt-2">
-                    <Label>Payment Method</Label>
+
+                  {/* Coupon Box */}
+                  <div className="space-y-1.5 pt-1">
+                    <Label className="text-xs">Promotional Coupon</Label>
+                    {appliedCoupon ? (
+                      <div className="flex items-center justify-between p-2 rounded border bg-emerald-50 dark:bg-emerald-950/40 text-xs">
+                        <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-semibold">
+                          <Tag className="h-3.5 w-3.5" />
+                          <span>{appliedCoupon.code}</span>
+                          <span>(-₹{couponDiscount})</span>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={handleRemoveCoupon} className="h-6 text-xs text-rose-600">
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="e.g. COMEBACK200, MONDAY50"
+                          value={couponCode}
+                          onChange={(e) => setCouponCode((e.target as HTMLInputElement).value.toUpperCase())}
+                          className="h-8 font-mono text-xs uppercase"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleApplyCoupon}
+                          disabled={isValidatingCoupon || !couponCode.trim()}
+                          className="h-8 text-xs"
+                        >
+                          {isValidatingCoupon ? "Checking..." : "Apply"}
+                        </Button>
+                      </div>
+                    )}
+                    {couponMessage && !appliedCoupon && (
+                      <p className="text-[11px] text-rose-500 font-medium">{couponMessage}</p>
+                    )}
+                  </div>
+
+                  {/* Loyalty Points Redemption Toggle */}
+                  {selectedClient && (selectedClient.loyalty_points || 0) > 0 && (
+                    <div className="p-2.5 rounded-md border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer font-medium">
+                          <input
+                            type="checkbox"
+                            checked={redeemLoyalty}
+                            onChange={(e) => setRedeemLoyalty((e.target as HTMLInputElement).checked)}
+                            className="rounded"
+                          />
+                          <span>Redeem Loyalty Points</span>
+                        </label>
+                        <span className="text-amber-700 dark:text-amber-300 font-bold">-₹{loyaltyDiscount}</span>
+                      </div>
+                      {redeemLoyalty && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <Label className="text-[11px] text-muted-foreground">Points:</Label>
+                          <Input
+                            type="number"
+                            value={loyaltyPointsToRedeem}
+                            max={selectedClient.loyalty_points || 0}
+                            min={0}
+                            step={10}
+                            onChange={(e) => setLoyaltyPointsToRedeem(Math.min(selectedClient.loyalty_points || 0, parseInt((e.target as HTMLInputElement).value, 10) || 0))}
+                            className="h-7 text-xs font-mono w-24"
+                          />
+                          <span className="text-[11px] text-muted-foreground">(= ₹{Math.floor(loyaltyPointsToRedeem / 10)} OFF)</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Payment Method */}
+                  <div className="space-y-2 pt-1">
+                    <Label>Payment Mode</Label>
                     <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="cash">Cash</SelectItem>
-                        <SelectItem value="card">Card</SelectItem>
-                        <SelectItem value="upi">UPI / Online</SelectItem>
+                        <SelectItem value="upi">UPI / QR Code</SelectItem>
+                        <SelectItem value="card">Credit / Debit Card</SelectItem>
+                        <SelectItem value="split">⚡ Split Payment (Cash + UPI + Card)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <Separator className="my-4" />
+                  {/* Split Payment Breakdown */}
+                  {paymentMethod === "split" && (
+                    <div className="p-3 rounded-lg border bg-muted/30 space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between font-semibold">
+                        <span>Split Distribution</span>
+                        <Button variant="ghost" size="sm" onClick={handleAutoFillSplit} className="h-6 text-[11px] text-primary p-1">
+                          Auto-Balance Card
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-[11px]">Cash (₹)</Label>
+                          <Input
+                            type="number"
+                            value={splitCash}
+                            onChange={(e) => setSplitCash(parseFloat((e.target as HTMLInputElement).value) || 0)}
+                            className="h-7 text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[11px]">UPI (₹)</Label>
+                          <Input
+                            type="number"
+                            value={splitUpi}
+                            onChange={(e) => setSplitUpi(parseFloat((e.target as HTMLInputElement).value) || 0)}
+                            className="h-7 text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[11px]">Card (₹)</Label>
+                          <Input
+                            type="number"
+                            value={splitCard}
+                            onChange={(e) => setSplitCard(parseFloat((e.target as HTMLInputElement).value) || 0)}
+                            className="h-7 text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-between text-[11px] text-muted-foreground pt-1">
+                        <span>Allocated: ₹{(splitCash + splitUpi + splitCard).toFixed(2)}</span>
+                        <span className={Math.abs((splitCash + splitUpi + splitCard) - total) > 0.05 ? "text-rose-500 font-bold" : "text-emerald-600 font-bold"}>
+                          Difference: ₹{((splitCash + splitUpi + splitCard) - total).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <Separator className="my-2" />
                   
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Subtotal</span>
-                      <span>${subtotal.toFixed(2)}</span>
+                  {/* Pricing Breakdown */}
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Subtotal</span>
+                      <span>₹{subtotal.toFixed(2)}</span>
                     </div>
+
+                    {discount > 0 && (
+                      <div className="flex justify-between text-emerald-600">
+                        <span>Manual Discount</span>
+                        <span>-₹{discount.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {couponDiscount > 0 && (
+                      <div className="flex justify-between text-emerald-600">
+                        <span>Coupon ({appliedCoupon?.code})</span>
+                        <span>-₹{couponDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {loyaltyDiscount > 0 && (
+                      <div className="flex justify-between text-amber-600">
+                        <span>Loyalty Points ({loyaltyPointsToRedeem} pts)</span>
+                        <span>-₹{loyaltyDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
                     
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-muted-foreground">Discount ($)</span>
-                      <Input 
-                        type="number" 
-                        value={discount} 
-                        onChange={e => setDiscount(parseFloat((e.target as HTMLInputElement).value) || 0)} 
-                        className="w-20 h-7 text-right"
-                      />
-                    </div>
-                    
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Tax ({taxPercent}%)</span>
-                      <span>${tax.toFixed(2)}</span>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>GST ({taxPercent}%)</span>
+                      <span>₹{tax.toFixed(2)}</span>
                     </div>
 
                     <Separator className="my-2" />
                     
-                    <div className="flex justify-between font-bold text-lg">
-                      <span>Total</span>
-                      <span>${total.toFixed(2)}</span>
+                    <div className="flex justify-between font-bold text-base text-foreground">
+                      <span>Payable Total</span>
+                      <span className="text-primary text-lg">₹{total.toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -236,7 +534,7 @@ export function PosBilling() {
                 <CardFooter>
                   <Button onClick={handleCheckout} disabled={isSubmitting || items.length === 0 || !clientId} className="w-full">
                     <CreditCard className="mr-2 h-4 w-4" />
-                    {isSubmitting ? "Processing..." : `Checkout $${total.toFixed(2)}`}
+                    {isSubmitting ? "Processing Sale..." : `Complete & Pay ₹${total.toFixed(2)}`}
                   </Button>
                 </CardFooter>
               </Card>
@@ -247,18 +545,19 @@ export function PosBilling() {
         <TabsContent value="history" className="mt-0">
           <Card>
             <CardHeader>
-              <CardTitle>Invoice History</CardTitle>
-              <CardDescription>View all past transactions.</CardDescription>
+              <CardTitle>Invoice History &amp; Receipts</CardTitle>
+              <CardDescription>View all completed and split payment transactions.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Invoice ID</TableHead>
+                    <TableHead>Invoice #</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Client</TableHead>
-                    <TableHead>Payment</TableHead>
-                    <TableHead>Total</TableHead>
+                    <TableHead>Payment Mode</TableHead>
+                    <TableHead>Discounts &amp; Coupon</TableHead>
+                    <TableHead>Total Paid</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">WhatsApp</TableHead>
                   </TableRow>
@@ -266,19 +565,37 @@ export function PosBilling() {
                 <TableBody>
                   {invoices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         No invoices found.
                       </TableCell>
                     </TableRow>
                   ) : (
                     invoices.map((inv) => (
                       <TableRow key={inv.id}>
-                        <TableCell className="font-medium">{inv.identifier}</TableCell>
-                        <TableCell>{new Date(inv.created_at).toLocaleDateString()}</TableCell>
-                        <TableCell>{clientLookup.find(c => c.id === inv.client_id)?.name || "Unknown"}</TableCell>
-                        <TableCell className="capitalize">{inv.payment_method}</TableCell>
-                        <TableCell>${inv.total.toFixed(2)}</TableCell>
-                        <TableCell className="capitalize">{inv.status}</TableCell>
+                        <TableCell className="font-medium font-mono text-xs">{inv.identifier}</TableCell>
+                        <TableCell className="text-xs">{new Date(inv.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-sm font-medium">
+                          {inv.client_name || clientLookup.find((c) => c.id === inv.client_id)?.name || "Walk-in"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="capitalize text-xs">
+                            {inv.payment_method === "split" ? "Split (Cash+UPI+Card)" : inv.payment_method}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {inv.coupon_code ? (
+                            <span className="font-mono text-primary font-semibold mr-1">{inv.coupon_code}</span>
+                          ) : null}
+                          {inv.loyalty_points_redeemed ? (
+                            <span className="text-amber-600 font-semibold">{inv.loyalty_points_redeemed} pts</span>
+                          ) : (!inv.coupon_code && !inv.loyalty_points_redeemed ? <span className="text-muted-foreground">—</span> : null)}
+                        </TableCell>
+                        <TableCell className="font-bold text-sm">₹{inv.total.toFixed(2)}</TableCell>
+                        <TableCell>
+                          <Badge variant={inv.status === "paid" ? "default" : "secondary"}>
+                            {inv.status.toUpperCase()}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="ghost"

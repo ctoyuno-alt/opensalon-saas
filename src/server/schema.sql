@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS clients (
   email TEXT DEFAULT '',
   phone TEXT DEFAULT '',
   notes TEXT DEFAULT '',
+  loyalty_points INTEGER NOT NULL DEFAULT 0,
+  total_spent REAL NOT NULL DEFAULT 0,
+  total_visits INTEGER NOT NULL DEFAULT 0,
+  last_visit_date TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -28,6 +32,8 @@ CREATE TABLE IF NOT EXISTS staff (
   phone TEXT DEFAULT '',
   title TEXT DEFAULT '',
   color TEXT NOT NULL DEFAULT '#7c3aed',
+  base_salary REAL NOT NULL DEFAULT 0,
+  commission_percent REAL NOT NULL DEFAULT 10,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -116,7 +122,14 @@ CREATE TABLE IF NOT EXISTS invoices (
   discount REAL NOT NULL DEFAULT 0,
   tax REAL NOT NULL DEFAULT 0,
   total REAL NOT NULL DEFAULT 0,
-  payment_method TEXT DEFAULT 'cash', -- 'cash', 'card', 'upi'
+  payment_method TEXT DEFAULT 'cash', -- 'cash', 'card', 'upi', 'split'
+  split_cash REAL NOT NULL DEFAULT 0,
+  split_upi REAL NOT NULL DEFAULT 0,
+  split_card REAL NOT NULL DEFAULT 0,
+  coupon_code TEXT DEFAULT '',
+  coupon_discount REAL NOT NULL DEFAULT 0,
+  loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0,
+  loyalty_discount REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'paid', 'cancelled'
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -212,4 +225,73 @@ CREATE TABLE IF NOT EXISTS whatsapp_logs (
 
 CREATE INDEX IF NOT EXISTS idx_whatsapp_logs_created ON whatsapp_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_logs_recipient ON whatsapp_logs(recipient_phone);
+
+-- ── Memberships & Packages ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS memberships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  price REAL NOT NULL,
+  duration_days INTEGER NOT NULL DEFAULT 365,
+  service_discount_percent REAL NOT NULL DEFAULT 10,
+  product_discount_percent REAL NOT NULL DEFAULT 15,
+  included_services_count INTEGER NOT NULL DEFAULT 12,
+  bonus_loyalty_points INTEGER NOT NULL DEFAULT 500,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS client_memberships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  membership_id INTEGER NOT NULL REFERENCES memberships(id) ON DELETE CASCADE,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  services_total INTEGER NOT NULL DEFAULT 12,
+  services_used INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active', -- 'active', 'expired', 'cancelled'
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_client_memberships_client ON client_memberships(client_id);
+
+-- ── Loyalty Program ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS loyalty_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  points INTEGER NOT NULL,
+  transaction_type TEXT NOT NULL, -- 'earned_invoice', 'redeemed_pos', 'membership_bonus', 'birthday_reward', 'adjustment'
+  reference_id INTEGER,
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_loyalty_client ON loyalty_transactions(client_id);
+
+-- ── Coupons & Offers ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS coupons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  description TEXT DEFAULT '',
+  discount_type TEXT NOT NULL DEFAULT 'flat', -- 'flat', 'percent'
+  discount_value REAL NOT NULL,
+  min_order_amount REAL NOT NULL DEFAULT 0,
+  valid_until TEXT DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  usage_limit INTEGER DEFAULT 100,
+  times_used INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ── Staff Commissions ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS staff_commissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  item_name TEXT NOT NULL,
+  item_type TEXT NOT NULL DEFAULT 'service', -- 'service' or 'product'
+  item_price REAL NOT NULL,
+  commission_percent REAL NOT NULL,
+  commission_amount REAL NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_staff_commissions_staff ON staff_commissions(staff_id);
 

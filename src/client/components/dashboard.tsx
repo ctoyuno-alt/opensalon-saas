@@ -58,6 +58,47 @@ export function Dashboard() {
         )}
       </div>
 
+      {/* Growth & Retention Action Banner */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border border-rose-200 bg-gradient-to-r from-rose-50/50 to-amber-50/30 dark:from-rose-950/20 dark:to-amber-950/10">
+          <CardContent className="flex items-center justify-between p-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-500 text-white font-bold text-xs">
+                  🔥
+                </span>
+                <span className="font-bold text-sm">Salon Growth Engine</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Recover inactive clients with 1-click WhatsApp comeback offers &amp; optimize slow weekday slots.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => navigate("/growth")} className="text-xs bg-rose-600 hover:bg-rose-700 text-white shrink-0 ml-3">
+              Open Growth Hub
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-amber-200 bg-gradient-to-r from-amber-50/50 to-yellow-50/30 dark:from-amber-950/20 dark:to-yellow-950/10">
+          <CardContent className="flex items-center justify-between p-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500 text-white font-bold text-xs">
+                  👑
+                </span>
+                <span className="font-bold text-sm">Memberships &amp; Loyalty</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Track client package quotas, create promotional coupon codes, and manage rewards.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => navigate("/memberships")} className="text-xs border-amber-300 text-amber-900 dark:text-amber-200 shrink-0 ml-3">
+              Manage VIP Club
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-lg">Today's Schedule</CardTitle>

@@ -81,6 +81,15 @@ export async function ensureSeeded(): Promise<void> {
     await seedIfEmpty("products", ["id", "name", "brand", "category", "price", "cost", "stock"], PRODUCTS);
     await seedIfEmpty("users", ["id", "username", "password_hash", "role"], USERS);
     await run("INSERT OR IGNORE INTO whatsapp_settings (id, provider) VALUES (1, 'meta')");
+    await run(`INSERT OR IGNORE INTO memberships (id, name, description, price, duration_days, service_discount_percent, product_discount_percent, included_services_count, bonus_loyalty_points)
+      VALUES 
+        (1, 'GOLD VIP', '12 Haircuts/year + 10% off services + 15% off products', 4999, 365, 10, 15, 12, 500),
+        (2, 'SILVER CLUB', '6 Haircuts/year + 5% off services + 10% off products', 2499, 180, 5, 10, 6, 250)`);
+    await run(`INSERT OR IGNORE INTO coupons (id, code, description, discount_type, discount_value, min_order_amount, is_active)
+      VALUES
+        (1, 'COMEBACK200', 'Special ₹200 OFF on your comeback visit!', 'flat', 200, 500, 1),
+        (2, 'MONDAY50', '50% OFF on Monday slow-hours booking', 'percent', 50, 400, 1),
+        (3, 'WELCOME15', '15% OFF on first visit', 'percent', 15, 300, 1)`);
     seeded = true;
   } catch {
     // Sample data must never fail a request; retry on the next one.
