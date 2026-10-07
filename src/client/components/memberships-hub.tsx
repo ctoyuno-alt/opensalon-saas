@@ -127,7 +127,11 @@ export function MembershipsHub() {
       alert("Client enrolled successfully! Included quota and bonus points allocated.");
       loadAll();
     } catch (err: any) {
-      alert("Failed to enroll client: " + err.message);
+      if (err.status === 401 || err.message?.includes("Unauthorized")) {
+        alert("Your session has expired. Please log in again to continue.");
+      } else {
+        alert("Failed to enroll client: " + (err.message || "Unknown error"));
+      }
     }
   };
 

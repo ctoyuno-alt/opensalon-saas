@@ -174,6 +174,8 @@ export interface Invoice {
   coupon_discount?: number;
   loyalty_points_redeemed?: number;
   loyalty_discount?: number;
+  membership_discount?: number;
+  membership_services_deducted?: number;
   status: "pending" | "paid" | "cancelled";
   created_at: string;
   updated_at: string;
@@ -268,6 +270,8 @@ export interface ClientMembership {
   services_used: number;
   status: "active" | "expired" | "cancelled";
   price?: number;
+  service_discount_percent?: number;
+  product_discount_percent?: number;
   created_at?: string;
 }
 

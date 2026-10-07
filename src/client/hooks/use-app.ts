@@ -155,6 +155,8 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
             fetchExpenses(expensesPag),
             fetchWhatsAppSettings(),
           ]);
+        } else {
+          localStorage.removeItem("auth_token");
         }
       } catch (err) {
         setError((err as Error).message);
@@ -163,6 +165,15 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       }
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setCurrentUser(null);
+      setError("Your session has expired. Please log in again.");
+    };
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
+  }, []);
 
   useEffect(() => {
     if (!currentUser) return;

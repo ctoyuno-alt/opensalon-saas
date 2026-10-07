@@ -40,14 +40,18 @@ app.use("/api/*", async (c, next) => {
   
   const authHeader = c.req.header("Authorization");
   const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-  if (!token) return c.json({ error: "Unauthorized" }, 401);
+  if (!token) {
+    console.error(`[AUTH 401] No token provided for ${c.req.method} ${c.req.path}. Header was: ${authHeader}`);
+    return c.json({ error: "Unauthorized" }, 401);
+  }
   
   try {
     const decoded = await verify(token, JWT_SECRET, "HS256");
     c.set("user", decoded as Env["Variables"]["user"]);
     return next();
-  } catch {
-    return c.json({ error: "Unauthorized" }, 401);
+  } catch (err: any) {
+    console.error(`[AUTH 401] Token verification failed for ${c.req.method} ${c.req.path}: ${err?.message || err}`);
+    return c.json({ error: "Unauthorized", message: err?.message }, 401);
   }
 });
 
@@ -111,6 +115,8 @@ const InvoiceSchema = z.object({
   coupon_discount: z.number().optional().nullable(),
   loyalty_points_redeemed: z.number().int().optional().nullable(),
   loyalty_discount: z.number().optional().nullable(),
+  membership_discount: z.number().optional().nullable(),
+  membership_services_deducted: z.number().int().optional().nullable(),
   status: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -174,6 +180,8 @@ const ClientMembershipSchema = z.object({
   services_total: z.number().int(),
   services_used: z.number().int(),
   status: z.string(),
+  service_discount_percent: z.number().optional().nullable(),
+  product_discount_percent: z.number().optional().nullable(),
   created_at: z.string().optional(),
 }).openapi("ClientMembership");
 
@@ -520,7 +528,7 @@ app.openapi(login, async (c) => {
     username: user.username, 
     role: user.role, 
     staff_id: user.staff_id,
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30 // 30 days
   };
   const token = await sign(payload, JWT_SECRET);
   
@@ -726,8 +734,8 @@ app.openapi(createInvoice, async (c) => {
     `INSERT INTO invoices (
       identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method,
       split_cash, split_upi, split_card, coupon_code, coupon_discount,
-      loyalty_points_redeemed, loyalty_discount, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      loyalty_points_redeemed, loyalty_discount, membership_discount, membership_services_deducted, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       identifier,
       data.appointment_id ? String(data.appointment_id) : null,
@@ -744,6 +752,8 @@ app.openapi(createInvoice, async (c) => {
       String(data.coupon_discount || 0),
       String(data.loyalty_points_redeemed || 0),
       String(data.loyalty_discount || 0),
+      String(data.membership_discount || 0),
+      String(data.membership_services_deducted || 0),
       data.status,
     ]
   );
@@ -835,17 +845,19 @@ app.openapi(createInvoice, async (c) => {
     }
   }
 
-  // 4. Membership quota deduction if client has active plan
+  // 4. Membership quota deduction if client has active plan and quota services were applied
   const activePlan = await get<{ id: number; services_total: number; services_used: number }>(
     "SELECT id, services_total, services_used FROM client_memberships WHERE client_id = ? AND status = 'active' AND end_date >= date('now') ORDER BY end_date ASC LIMIT 1",
     [String(data.client_id)]
   );
-  if (activePlan && data.items) {
-    const serviceItemsCount = data.items.filter(i => i.item_type === "service").length;
-    if (serviceItemsCount > 0) {
+  if (activePlan) {
+    const servicesToDeduct = data.membership_services_deducted !== undefined
+      ? data.membership_services_deducted
+      : 0;
+    if (servicesToDeduct > 0) {
       await run(
         "UPDATE client_memberships SET services_used = MIN(services_total, services_used + ?) WHERE id = ?",
-        [String(serviceItemsCount), String(activePlan.id)]
+        [String(servicesToDeduct), String(activePlan.id)]
       );
     }
   }
@@ -2507,7 +2519,8 @@ const listClientMemberships = createRoute({
 
 app.openapi(listClientMemberships, async (c) => {
   const rows = await query<any>(`
-    SELECT cm.*, c.name as client_name, c.phone as client_phone, m.name as membership_name
+    SELECT cm.*, c.name as client_name, c.phone as client_phone, 
+           m.name as membership_name, m.service_discount_percent, m.product_discount_percent
     FROM client_memberships cm
     JOIN clients c ON cm.client_id = c.id
     JOIN memberships m ON cm.membership_id = m.id
@@ -2575,7 +2588,8 @@ app.openapi(createClientMembership, async (c) => {
   }
 
   const clientMembership = await get<any>(`
-    SELECT cm.*, c.name as client_name, c.phone as client_phone, m.name as membership_name
+    SELECT cm.*, c.name as client_name, c.phone as client_phone, 
+           m.name as membership_name, m.service_discount_percent, m.product_discount_percent
     FROM client_memberships cm
     JOIN clients c ON cm.client_id = c.id
     JOIN memberships m ON cm.membership_id = m.id

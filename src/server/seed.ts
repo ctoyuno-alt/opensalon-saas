@@ -90,6 +90,12 @@ export async function ensureSeeded(): Promise<void> {
         (1, 'COMEBACK200', 'Special ₹200 OFF on your comeback visit!', 'flat', 200, 500, 1),
         (2, 'MONDAY50', '50% OFF on Monday slow-hours booking', 'percent', 50, 400, 1),
         (3, 'WELCOME15', '15% OFF on first visit', 'percent', 15, 300, 1)`);
+    try {
+      await run("ALTER TABLE invoices ADD COLUMN membership_discount REAL NOT NULL DEFAULT 0");
+    } catch {}
+    try {
+      await run("ALTER TABLE invoices ADD COLUMN membership_services_deducted INTEGER NOT NULL DEFAULT 0");
+    } catch {}
     seeded = true;
   } catch {
     // Sample data must never fail a request; retry on the next one.

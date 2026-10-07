@@ -177,3 +177,69 @@ test("POS invoices handle split payments, coupon tracking, and staff commissions
   const comms = (commRes.body as any).commissions;
   assert.ok(comms.length >= 2);
 });
+
+test("POS invoice applies membership benefits and decrements quota accurately", async (t) => {
+  const { call } = await setup(t);
+
+  // 1. Create client membership plan
+  const planRes = await call("POST", "/api/memberships", {
+    name: "PLATINUM VIP",
+    description: "12 included services, 10% extra service disc, 15% product disc",
+    price: 3999,
+    duration_days: 365,
+    service_discount_percent: 10,
+    product_discount_percent: 15,
+    included_services_count: 12,
+    bonus_loyalty_points: 200,
+    active: 1,
+  });
+  assert.equal(planRes.status, 201);
+  const plan = (planRes.body as any).membership;
+
+  // 2. Enroll Client 1
+  const enrollRes = await call("POST", "/api/client-memberships", {
+    client_id: 1,
+    membership_id: plan.id,
+  });
+  assert.equal(enrollRes.status, 201);
+  const enrolled = (enrollRes.body as any).client_membership;
+  assert.equal(enrolled.services_used, 0);
+  assert.equal(enrolled.services_total, 12);
+  assert.equal(enrolled.service_discount_percent, 10);
+  assert.equal(enrolled.product_discount_percent, 15);
+
+  // 3. Create POS invoice with 1 service covered by quota and 1 retail product discounted
+  const invRes = await call("POST", "/api/invoices", {
+    client_id: 1,
+    appointment_id: null,
+    subtotal: 165.99,
+    discount: 126.90, // 120 (service covered) + 6.90 (15% off 45.99 product)
+    tax: 7.04,
+    total: 46.13,
+    payment_method: "cash",
+    membership_discount: 126.90,
+    membership_services_deducted: 1,
+    status: "paid",
+    items: [
+      { item_type: "service", item_id: 1, name: "Standard Session", quantity: 1, price: 120, total: 120 },
+      { item_type: "product", item_id: null, name: "Essential Oil Set", quantity: 1, price: 45.99, total: 45.99 },
+    ],
+  });
+  assert.equal(invRes.status, 200);
+  const inv = (invRes.body as any).invoice;
+  assert.equal(inv.membership_discount, 126.90);
+  assert.equal(inv.membership_services_deducted, 1);
+  assert.equal(inv.total, 46.13);
+
+  // 4. Verify client membership services_used has been incremented by 1
+  const listCmRes = await call("GET", "/api/client-memberships");
+  assert.equal(listCmRes.status, 200);
+  const allCm = (listCmRes.body as any).client_memberships;
+  const client1Plan = allCm.find((cm: any) => cm.client_id === 1 && cm.status === "active");
+  assert.ok(client1Plan);
+  assert.equal(client1Plan.services_used, 1);
+  assert.equal(client1Plan.services_total, 12);
+  assert.equal(client1Plan.service_discount_percent, 10);
+  assert.equal(client1Plan.product_discount_percent, 15);
+});
+

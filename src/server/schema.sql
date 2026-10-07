@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   coupon_discount REAL NOT NULL DEFAULT 0,
   loyalty_points_redeemed INTEGER NOT NULL DEFAULT 0,
   loyalty_discount REAL NOT NULL DEFAULT 0,
+  membership_discount REAL NOT NULL DEFAULT 0,
+  membership_services_deducted INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'paid', 'cancelled'
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
