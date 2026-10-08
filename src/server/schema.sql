@@ -337,4 +337,19 @@ CREATE TABLE IF NOT EXISTS staff_commissions (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_staff_commissions_staff ON staff_commissions(staff_id);
-
+-- ── Staff Attendance & Time Clock ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS staff_attendance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  work_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'present', -- 'present', 'late', 'half_day', 'absent', 'on_leave'
+  clock_in TEXT DEFAULT '',
+  clock_out TEXT DEFAULT '',
+  total_hours REAL NOT NULL DEFAULT 0,
+  notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(staff_id, work_date)
+);
+CREATE INDEX IF NOT EXISTS idx_staff_attendance_date ON staff_attendance(work_date);
+CREATE INDEX IF NOT EXISTS idx_staff_attendance_staff ON staff_attendance(staff_id);

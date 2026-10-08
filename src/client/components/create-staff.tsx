@@ -14,13 +14,23 @@ export function CreateStaff({ onClose }: { onClose: () => void }) {
   const [phone, setPhone] = useState("");
   const [title, setTitle] = useState("");
   const [color, setColor] = useState(COLORS[0]);
+  const [baseSalary, setBaseSalary] = useState("0");
+  const [commissionPercent, setCommissionPercent] = useState("10");
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async () => {
     if (!name.trim()) { setError("Name is required"); return; }
     setSaving(true);
     try {
-      await addStaff({ name: name.trim(), email, phone, title, color });
+      await addStaff({
+        name: name.trim(),
+        email,
+        phone,
+        title,
+        color,
+        base_salary: Number(baseSalary) || 0,
+        commission_percent: Number(commissionPercent) || 10,
+      });
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -54,8 +64,29 @@ export function CreateStaff({ onClose }: { onClose: () => void }) {
               <Input value={phone} onChange={(e) => setPhone((e.target as HTMLInputElement).value)} />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Commission Rate (%)</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                value={commissionPercent}
+                onChange={(e) => setCommissionPercent((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Base Salary (₹/mo)</Label>
+              <Input
+                type="number"
+                min="0"
+                value={baseSalary}
+                onChange={(e) => setBaseSalary((e.target as HTMLInputElement).value)}
+              />
+            </div>
+          </div>
           <div className="space-y-1.5">
-            <Label>Color</Label>
+            <Label>Color Tag</Label>
             <div className="flex gap-2">
               {COLORS.map((c) => (
                 <button

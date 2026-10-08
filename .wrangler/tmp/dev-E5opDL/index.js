@@ -9902,6 +9902,21 @@ async function ensureSeeded() {
         (1, 'COMEBACK200', 'Special \u20B9200 OFF on your comeback visit!', 'flat', 200, 500, 1),
         (2, 'MONDAY50', '50% OFF on Monday slow-hours booking', 'percent', 50, 400, 1),
         (3, 'WELCOME15', '15% OFF on first visit', 'percent', 15, 300, 1)`);
+    await run(`INSERT OR IGNORE INTO users (id, username, password_hash, role, staff_id)
+      VALUES (2, 'alex', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 'staff', 1)`);
+    const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const existingAtt = await get("SELECT COUNT(*) as count FROM staff_attendance");
+    if ((existingAtt?.count ?? 0) === 0) {
+      await run(
+        `INSERT OR IGNORE INTO staff_attendance (staff_id, work_date, status, clock_in, clock_out, total_hours, notes)
+        VALUES 
+          (1, ?, 'present', '09:00', '18:00', 9.0, 'Full shift'),
+          (2, ?, 'present', '09:15', '', 0, 'Morning shift in progress'),
+          (3, ?, 'late', '09:45', '', 0, 'Traffic delay'),
+          (4, ?, 'on_leave', '', '', 0, 'Approved annual leave')`,
+        [todayStr, todayStr, todayStr, todayStr]
+      );
+    }
     try {
       await run("ALTER TABLE invoices ADD COLUMN membership_discount REAL NOT NULL DEFAULT 0");
     } catch {
@@ -10679,6 +10694,262 @@ async function sendInvoiceReceiptSMSNotification(invoiceId) {
 }
 __name(sendInvoiceReceiptSMSNotification, "sendInvoiceReceiptSMSNotification");
 
+// src/server/staff-attendance.ts
+function getTodayString() {
+  const d = /* @__PURE__ */ new Date();
+  return d.toISOString().split("T")[0];
+}
+__name(getTodayString, "getTodayString");
+function getCurrentTimeString() {
+  const d = /* @__PURE__ */ new Date();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const mins = String(d.getMinutes()).padStart(2, "0");
+  return `${hours}:${mins}`;
+}
+__name(getCurrentTimeString, "getCurrentTimeString");
+function calculateHours(clockIn2, clockOut2) {
+  if (!clockIn2 || !clockOut2) return 0;
+  const [inH, inM] = clockIn2.split(":").map(Number);
+  const [outH, outM] = clockOut2.split(":").map(Number);
+  if (isNaN(inH) || isNaN(inM) || isNaN(outH) || isNaN(outM)) return 0;
+  const inMinutes = inH * 60 + inM;
+  const outMinutes = outH * 60 + outM;
+  if (outMinutes <= inMinutes) return 0;
+  return Math.round((outMinutes - inMinutes) / 60 * 100) / 100;
+}
+__name(calculateHours, "calculateHours");
+async function getDayAttendance(workDate) {
+  const date = workDate || getTodayString();
+  const rows = await query(
+    `SELECT 
+       s.id as staff_id,
+       s.name as staff_name,
+       s.title as staff_title,
+       s.color as staff_color,
+       s.active as staff_active,
+       a.id as attendance_id,
+       a.work_date,
+       a.status,
+       a.clock_in,
+       a.clock_out,
+       a.total_hours,
+       a.notes,
+       a.created_at,
+       a.updated_at
+     FROM staff s
+     LEFT JOIN staff_attendance a ON s.id = a.staff_id AND a.work_date = ?
+     WHERE s.active = 1
+     ORDER BY s.name ASC`,
+    [date]
+  );
+  let presentCount = 0;
+  let lateCount = 0;
+  let halfDayCount = 0;
+  let absentCount = 0;
+  let onLeaveCount = 0;
+  let notMarkedCount = 0;
+  const records = (rows || []).map((r) => {
+    const rawStatus = r.status || "not_marked";
+    let status = rawStatus;
+    if (status === "present") presentCount++;
+    else if (status === "late") lateCount++;
+    else if (status === "half_day") halfDayCount++;
+    else if (status === "absent") absentCount++;
+    else if (status === "on_leave") onLeaveCount++;
+    else notMarkedCount++;
+    return {
+      id: r.attendance_id || void 0,
+      staff_id: r.staff_id,
+      staff_name: r.staff_name,
+      staff_title: r.staff_title || "",
+      staff_color: r.staff_color || "#7c3aed",
+      work_date: date,
+      status,
+      clock_in: r.clock_in || "",
+      clock_out: r.clock_out || "",
+      total_hours: Number(r.total_hours || 0),
+      notes: r.notes || "",
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    };
+  });
+  return {
+    date,
+    total_staff: records.length,
+    present_count: presentCount,
+    late_count: lateCount,
+    half_day_count: halfDayCount,
+    absent_count: absentCount,
+    on_leave_count: onLeaveCount,
+    not_marked_count: notMarkedCount,
+    records
+  };
+}
+__name(getDayAttendance, "getDayAttendance");
+async function clockIn(params) {
+  const date = params.date || getTodayString();
+  const time3 = params.time || getCurrentTimeString();
+  const existing = await get(
+    "SELECT * FROM staff_attendance WHERE staff_id = ? AND work_date = ?",
+    [String(params.staff_id), date]
+  );
+  const defaultStatus = time3 > "09:30" ? "late" : "present";
+  if (existing) {
+    const newStatus = existing.status === "not_marked" || !existing.status ? defaultStatus : existing.status;
+    const hours = calculateHours(time3, existing.clock_out || "");
+    await run(
+      `UPDATE staff_attendance 
+       SET clock_in = ?, status = ?, total_hours = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+      [time3, newStatus, String(hours), String(existing.id)]
+    );
+  } else {
+    await run(
+      `INSERT INTO staff_attendance (staff_id, work_date, status, clock_in, clock_out, total_hours, notes)
+       VALUES (?, ?, ?, ?, '', 0, '')`,
+      [String(params.staff_id), date, defaultStatus, time3]
+    );
+  }
+  const updatedDay = await getDayAttendance(date);
+  return updatedDay.records.find((r) => r.staff_id === params.staff_id);
+}
+__name(clockIn, "clockIn");
+async function clockOut(params) {
+  const date = params.date || getTodayString();
+  const time3 = params.time || getCurrentTimeString();
+  const existing = await get(
+    "SELECT * FROM staff_attendance WHERE staff_id = ? AND work_date = ?",
+    [String(params.staff_id), date]
+  );
+  if (existing) {
+    const hours = calculateHours(existing.clock_in || "", time3);
+    await run(
+      `UPDATE staff_attendance 
+       SET clock_out = ?, total_hours = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+      [time3, String(hours), String(existing.id)]
+    );
+  } else {
+    await run(
+      `INSERT INTO staff_attendance (staff_id, work_date, status, clock_in, clock_out, total_hours, notes)
+       VALUES (?, ?, 'present', '', ?, 0, '')`,
+      [String(params.staff_id), date, time3]
+    );
+  }
+  const updatedDay = await getDayAttendance(date);
+  return updatedDay.records.find((r) => r.staff_id === params.staff_id);
+}
+__name(clockOut, "clockOut");
+async function upsertAttendance(record) {
+  const { staff_id, work_date, status, clock_in = "", clock_out = "", notes = "" } = record;
+  const hours = record.total_hours !== void 0 ? record.total_hours : calculateHours(clock_in, clock_out);
+  const existing = await get(
+    "SELECT id FROM staff_attendance WHERE staff_id = ? AND work_date = ?",
+    [String(staff_id), work_date]
+  );
+  if (existing) {
+    await run(
+      `UPDATE staff_attendance 
+       SET status = ?, clock_in = ?, clock_out = ?, total_hours = ?, notes = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+      [status, clock_in, clock_out, String(hours), notes, String(existing.id)]
+    );
+  } else {
+    await run(
+      `INSERT INTO staff_attendance (staff_id, work_date, status, clock_in, clock_out, total_hours, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [String(staff_id), work_date, status, clock_in, clock_out, String(hours), notes]
+    );
+  }
+  const updatedDay = await getDayAttendance(work_date);
+  return updatedDay.records.find((r) => r.staff_id === staff_id);
+}
+__name(upsertAttendance, "upsertAttendance");
+async function bulkMarkAttendance(workDate, status, staffIds) {
+  const date = workDate || getTodayString();
+  const activeStaff = await query("SELECT id FROM staff WHERE active = 1");
+  const targetIds = staffIds && staffIds.length > 0 ? staffIds : (activeStaff || []).map((s) => s.id);
+  for (const sId of targetIds) {
+    const existing = await get(
+      "SELECT id FROM staff_attendance WHERE staff_id = ? AND work_date = ?",
+      [String(sId), date]
+    );
+    if (existing) {
+      await run("UPDATE staff_attendance SET status = ?, updated_at = datetime('now') WHERE id = ?", [
+        status,
+        String(existing.id)
+      ]);
+    } else {
+      await run(
+        "INSERT INTO staff_attendance (staff_id, work_date, status, clock_in, clock_out, total_hours, notes) VALUES (?, ?, ?, '', '', 0, '')",
+        [String(sId), date, status]
+      );
+    }
+  }
+  return getDayAttendance(date);
+}
+__name(bulkMarkAttendance, "bulkMarkAttendance");
+async function getStaffPortalData(staffId, selectedDate) {
+  const date = selectedDate || getTodayString();
+  const staff = await get("SELECT * FROM staff WHERE id = ?", [String(staffId)]);
+  if (!staff) return null;
+  const daySummary = await getDayAttendance(date);
+  const todayAttendance = daySummary.records.find((r) => r.staff_id === staffId) || null;
+  const todayAppointments = await query(
+    `SELECT a.*, c.name as client_name, c.phone as client_phone
+     FROM appointments a
+     LEFT JOIN clients c ON a.client_id = c.id
+     WHERE a.staff_id = ? AND a.scheduled_date = ?
+     ORDER BY a.start_time ASC`,
+    [String(staffId), date]
+  );
+  const monthStart = `${date.substring(0, 7)}-01`;
+  const commSummary = await get(
+    `SELECT 
+       COALESCE(SUM(commission_amount), 0) as total_commission,
+       COALESCE(SUM(CASE WHEN item_type = 'service' THEN item_price ELSE 0 END), 0) as total_service_sales,
+       COALESCE(SUM(CASE WHEN item_type = 'product' THEN item_price ELSE 0 END), 0) as total_product_sales,
+       COUNT(*) as total_items
+     FROM staff_commissions
+     WHERE staff_id = ? AND created_at >= ?`,
+    [String(staffId), monthStart]
+  );
+  const commissionsList = await query(
+    `SELECT sc.*, i.identifier as invoice_identifier
+     FROM staff_commissions sc
+     LEFT JOIN invoices i ON sc.invoice_id = i.id
+     WHERE sc.staff_id = ?
+     ORDER BY sc.created_at DESC
+     LIMIT 20`,
+    [String(staffId)]
+  );
+  const monthAtt = await get(
+    `SELECT 
+       COUNT(CASE WHEN status IN ('present', 'late', 'half_day') THEN 1 END) as days_present,
+       COALESCE(SUM(total_hours), 0) as total_hours
+     FROM staff_attendance
+     WHERE staff_id = ? AND work_date >= ?`,
+    [String(staffId), monthStart]
+  );
+  return {
+    staff,
+    todayAttendance,
+    todayAppointments: todayAppointments || [],
+    monthCommissions: {
+      total_commission: Number(commSummary?.total_commission || 0),
+      total_service_sales: Number(commSummary?.total_service_sales || 0),
+      total_product_sales: Number(commSummary?.total_product_sales || 0),
+      total_items: Number(commSummary?.total_items || 0)
+    },
+    commissionsList: commissionsList || [],
+    monthAttendanceSummary: {
+      days_present: Number(monthAtt?.days_present || 0),
+      total_hours: Number(monthAtt?.total_hours || 0)
+    }
+  };
+}
+__name(getStaffPortalData, "getStaffPortalData");
+
 // src/server/index.ts
 var app = createApp({
   title: "OpenSalon",
@@ -10860,6 +11131,48 @@ var StaffCommissionSchema = external_exports.object({
   commission_amount: external_exports.number(),
   created_at: external_exports.string().optional()
 }).openapi("StaffCommission");
+var StaffAttendanceRecordSchema = external_exports.object({
+  id: external_exports.number().int().optional(),
+  staff_id: external_exports.number().int(),
+  staff_name: external_exports.string(),
+  staff_title: external_exports.string().optional().nullable(),
+  staff_color: external_exports.string().optional().nullable(),
+  work_date: external_exports.string(),
+  status: external_exports.string(),
+  clock_in: external_exports.string(),
+  clock_out: external_exports.string(),
+  total_hours: external_exports.number(),
+  notes: external_exports.string(),
+  created_at: external_exports.string().optional(),
+  updated_at: external_exports.string().optional()
+}).openapi("StaffAttendanceRecord");
+var DayAttendanceSummarySchema = external_exports.object({
+  date: external_exports.string(),
+  total_staff: external_exports.number().int(),
+  present_count: external_exports.number().int(),
+  late_count: external_exports.number().int(),
+  half_day_count: external_exports.number().int(),
+  absent_count: external_exports.number().int(),
+  on_leave_count: external_exports.number().int(),
+  not_marked_count: external_exports.number().int(),
+  records: external_exports.array(StaffAttendanceRecordSchema)
+}).openapi("DayAttendanceSummary");
+var StaffPortalSchema = external_exports.object({
+  staff: StaffSchema,
+  todayAttendance: StaffAttendanceRecordSchema.nullable(),
+  todayAppointments: external_exports.array(external_exports.any()),
+  monthCommissions: external_exports.object({
+    total_commission: external_exports.number(),
+    total_service_sales: external_exports.number(),
+    total_product_sales: external_exports.number(),
+    total_items: external_exports.number()
+  }),
+  commissionsList: external_exports.array(external_exports.any()),
+  monthAttendanceSummary: external_exports.object({
+    days_present: external_exports.number(),
+    total_hours: external_exports.number()
+  })
+}).openapi("StaffPortalData");
 var InactiveClientAlertSchema = external_exports.object({
   id: external_exports.number().int(),
   name: external_exports.string(),
@@ -12166,7 +12479,9 @@ var createStaff = createRoute({
       email: external_exports.string().optional(),
       phone: external_exports.string().optional(),
       title: external_exports.string().optional(),
-      color: external_exports.string().optional()
+      color: external_exports.string().optional(),
+      base_salary: external_exports.number().optional(),
+      commission_percent: external_exports.number().optional()
     }) } } }
   },
   responses: { 201: { description: "Created", content: { "application/json": { schema: external_exports.object({ staff: StaffSchema }) } } } }
@@ -12174,8 +12489,16 @@ var createStaff = createRoute({
 app.openapi(createStaff, async (c) => {
   const body = c.req.valid("json");
   const result = await run(
-    "INSERT INTO staff (name, email, phone, title, color) VALUES (?, ?, ?, ?, ?)",
-    [body.name, body.email || "", body.phone || "", body.title || "", body.color || "#7c3aed"]
+    "INSERT INTO staff (name, email, phone, title, color, base_salary, commission_percent) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+      body.name,
+      body.email || "",
+      body.phone || "",
+      body.title || "",
+      body.color || "#7c3aed",
+      body.base_salary !== void 0 ? String(body.base_salary) : "0",
+      body.commission_percent !== void 0 ? String(body.commission_percent) : "10"
+    ]
   );
   const staff = await get("SELECT * FROM staff WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ staff }, 201);
@@ -12191,7 +12514,9 @@ var updateStaff = createRoute({
       phone: external_exports.string().optional(),
       title: external_exports.string().optional(),
       color: external_exports.string().optional(),
-      active: external_exports.number().int().optional()
+      active: external_exports.number().int().optional(),
+      base_salary: external_exports.number().optional(),
+      commission_percent: external_exports.number().optional()
     }) } } }
   },
   responses: { 200: { description: "Updated", content: { "application/json": { schema: OkSchema } } } }
@@ -13476,6 +13801,169 @@ app.openapi(listStaffCommissions, async (c) => {
   q += " ORDER BY sc.created_at DESC LIMIT 100";
   const rows = await query(q, params);
   return c.json({ commissions: rows }, 200);
+});
+var getStaffAttendance = createRoute({
+  method: "get",
+  path: "/api/staff-attendance",
+  request: {
+    query: external_exports.object({
+      date: external_exports.string().optional()
+    })
+  },
+  responses: {
+    200: {
+      description: "Day attendance summary",
+      content: { "application/json": { schema: external_exports.object({ summary: DayAttendanceSummarySchema }) } }
+    }
+  }
+});
+app.openapi(getStaffAttendance, async (c) => {
+  const { date } = c.req.valid("query");
+  const summary = await getDayAttendance(date);
+  return c.json({ summary }, 200);
+});
+var clockInEndpoint = createRoute({
+  method: "post",
+  path: "/api/staff-attendance/clock-in",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            staff_id: external_exports.number().int(),
+            date: external_exports.string().optional(),
+            time: external_exports.string().optional()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Clock in result",
+      content: { "application/json": { schema: external_exports.object({ record: StaffAttendanceRecordSchema }) } }
+    }
+  }
+});
+app.openapi(clockInEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const record = await clockIn(body);
+  return c.json({ record }, 200);
+});
+var clockOutEndpoint = createRoute({
+  method: "post",
+  path: "/api/staff-attendance/clock-out",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            staff_id: external_exports.number().int(),
+            date: external_exports.string().optional(),
+            time: external_exports.string().optional()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Clock out result",
+      content: { "application/json": { schema: external_exports.object({ record: StaffAttendanceRecordSchema }) } }
+    }
+  }
+});
+app.openapi(clockOutEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const record = await clockOut(body);
+  return c.json({ record }, 200);
+});
+var updateAttendanceEndpoint = createRoute({
+  method: "put",
+  path: "/api/staff-attendance",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            staff_id: external_exports.number().int(),
+            work_date: external_exports.string(),
+            status: external_exports.string(),
+            clock_in: external_exports.string().optional(),
+            clock_out: external_exports.string().optional(),
+            total_hours: external_exports.number().optional(),
+            notes: external_exports.string().optional()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Updated attendance record",
+      content: { "application/json": { schema: external_exports.object({ record: StaffAttendanceRecordSchema }) } }
+    }
+  }
+});
+app.openapi(updateAttendanceEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const record = await upsertAttendance(body);
+  return c.json({ record }, 200);
+});
+var bulkAttendanceEndpoint = createRoute({
+  method: "post",
+  path: "/api/staff-attendance/bulk",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            work_date: external_exports.string(),
+            status: external_exports.string(),
+            staff_ids: external_exports.array(external_exports.number().int()).optional()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Bulk attendance summary",
+      content: { "application/json": { schema: external_exports.object({ summary: DayAttendanceSummarySchema }) } }
+    }
+  }
+});
+app.openapi(bulkAttendanceEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const summary = await bulkMarkAttendance(body.work_date, body.status, body.staff_ids);
+  return c.json({ summary }, 200);
+});
+var getStaffPortalEndpoint = createRoute({
+  method: "get",
+  path: "/api/staff/{id}/portal",
+  request: {
+    params: IdParam,
+    query: external_exports.object({
+      date: external_exports.string().optional()
+    })
+  },
+  responses: {
+    200: {
+      description: "Staff personal portal data",
+      content: { "application/json": { schema: external_exports.object({ portal: StaffPortalSchema }) } }
+    },
+    404: {
+      description: "Staff not found",
+      content: { "application/json": { schema: ErrorSchema } }
+    }
+  }
+});
+app.openapi(getStaffPortalEndpoint, async (c) => {
+  const { id } = c.req.valid("param");
+  const { date } = c.req.valid("query");
+  const portal = await getStaffPortalData(id, date);
+  if (!portal) return c.json({ error: "Staff member not found" }, 404);
+  return c.json({ portal }, 200);
 });
 var server_default = app;
 

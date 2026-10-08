@@ -91,6 +91,23 @@ export async function ensureSeeded(): Promise<void> {
         (1, 'COMEBACK200', 'Special ₹200 OFF on your comeback visit!', 'flat', 200, 500, 1),
         (2, 'MONDAY50', '50% OFF on Monday slow-hours booking', 'percent', 50, 400, 1),
         (3, 'WELCOME15', '15% OFF on first visit', 'percent', 15, 300, 1)`);
+    await run(`INSERT OR IGNORE INTO users (id, username, password_hash, role, staff_id)
+      VALUES (2, 'alex', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 'staff', 1)`);
+    
+    // Seed initial attendance for today if empty
+    const todayStr = new Date().toISOString().split("T")[0];
+    const existingAtt = await get<{ count: number }>("SELECT COUNT(*) as count FROM staff_attendance");
+    if ((existingAtt?.count ?? 0) === 0) {
+      await run(`INSERT OR IGNORE INTO staff_attendance (staff_id, work_date, status, clock_in, clock_out, total_hours, notes)
+        VALUES 
+          (1, ?, 'present', '09:00', '18:00', 9.0, 'Full shift'),
+          (2, ?, 'present', '09:15', '', 0, 'Morning shift in progress'),
+          (3, ?, 'late', '09:45', '', 0, 'Traffic delay'),
+          (4, ?, 'on_leave', '', '', 0, 'Approved annual leave')`,
+        [todayStr, todayStr, todayStr, todayStr]
+      );
+    }
+
     try {
       await run("ALTER TABLE invoices ADD COLUMN membership_discount REAL NOT NULL DEFAULT 0");
     } catch {}

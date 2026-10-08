@@ -359,6 +359,53 @@ export interface StaffCommission {
   created_at?: string;
 }
 
+export type AttendanceStatus = "present" | "late" | "half_day" | "absent" | "on_leave" | "not_marked";
+
+export interface StaffAttendanceRecord {
+  id?: number;
+  staff_id: number;
+  staff_name: string;
+  staff_title?: string;
+  staff_color?: string;
+  work_date: string;
+  status: AttendanceStatus;
+  clock_in: string;
+  clock_out: string;
+  total_hours: number;
+  notes: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DayAttendanceSummary {
+  date: string;
+  total_staff: number;
+  present_count: number;
+  late_count: number;
+  half_day_count: number;
+  absent_count: number;
+  on_leave_count: number;
+  not_marked_count: number;
+  records: StaffAttendanceRecord[];
+}
+
+export interface StaffPortalData {
+  staff: Staff;
+  todayAttendance: StaffAttendanceRecord | null;
+  todayAppointments: Appointment[];
+  monthCommissions: {
+    total_commission: number;
+    total_service_sales: number;
+    total_product_sales: number;
+    total_items: number;
+  };
+  commissionsList: StaffCommission[];
+  monthAttendanceSummary: {
+    days_present: number;
+    total_hours: number;
+  };
+}
+
 export interface InactiveClientAlert {
   id: number;
   name: string;

@@ -4,7 +4,7 @@ import { today } from "../lib/dates";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, Invoice, Expense, WhatsAppSettings, WhatsAppLog, SendWhatsAppResult,
-  SmsSettings, SmsLog, SendSmsResult,
+  SmsSettings, SmsLog, SendSmsResult, DayAttendanceSummary, StaffAttendanceRecord, StaffCommission, StaffPortalData,
 } from "../types";
 import type { AppContextValue } from "../context";
 
@@ -564,6 +564,100 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     return res.result;
   }, [smsLogsPag, fetchSmsLogs]);
 
+  // Staff Attendance & Commissions
+  const [attendanceSummary, setAttendanceSummary] = useState<DayAttendanceSummary | null>(null);
+  const [selectedAttendanceDate, setSelectedAttendanceDate] = useState<string>(todayStr);
+  const [staffCommissions, setStaffCommissions] = useState<StaffCommission[]>([]);
+  const [staffPortalData, setStaffPortalData] = useState<StaffPortalData | null>(null);
+
+  const loadAttendance = useCallback(async (date?: string) => {
+    try {
+      const targetDate = date || selectedAttendanceDate || todayStr;
+      const res = await api<{ summary: DayAttendanceSummary }>("GET", `/api/staff-attendance?date=${targetDate}`);
+      setAttendanceSummary(res.summary);
+      if (date) setSelectedAttendanceDate(date);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [selectedAttendanceDate, todayStr]);
+
+  const clockInStaff = useCallback(async (staffId: number, time?: string) => {
+    try {
+      await api<{ record: StaffAttendanceRecord }>("POST", "/api/staff-attendance/clock-in", {
+        staff_id: staffId,
+        date: selectedAttendanceDate,
+        time,
+      });
+      await loadAttendance(selectedAttendanceDate);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [selectedAttendanceDate, loadAttendance]);
+
+  const clockOutStaff = useCallback(async (staffId: number, time?: string) => {
+    try {
+      await api<{ record: StaffAttendanceRecord }>("POST", "/api/staff-attendance/clock-out", {
+        staff_id: staffId,
+        date: selectedAttendanceDate,
+        time,
+      });
+      await loadAttendance(selectedAttendanceDate);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [selectedAttendanceDate, loadAttendance]);
+
+  const updateAttendanceRecord = useCallback(async (record: {
+    staff_id: number;
+    work_date: string;
+    status: string;
+    clock_in?: string;
+    clock_out?: string;
+    total_hours?: number;
+    notes?: string;
+  }) => {
+    try {
+      await api<{ record: StaffAttendanceRecord }>("PUT", "/api/staff-attendance", record);
+      await loadAttendance(record.work_date);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, [loadAttendance]);
+
+  const bulkMarkAttendance = useCallback(async (date: string, status: string, staffIds?: number[]) => {
+    try {
+      const res = await api<{ summary: DayAttendanceSummary }>("POST", "/api/staff-attendance/bulk", {
+        work_date: date,
+        status,
+        staff_ids: staffIds,
+      });
+      setAttendanceSummary(res.summary);
+      setSelectedAttendanceDate(date);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, []);
+
+  const loadStaffCommissions = useCallback(async (staffId?: number) => {
+    try {
+      const q = staffId ? `?staff_id=${staffId}` : "";
+      const res = await api<{ commissions: StaffCommission[] }>("GET", `/api/staff-commissions${q}`);
+      setStaffCommissions(res.commissions || []);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, []);
+
+  const loadStaffPortalData = useCallback(async (staffId: number, date?: string) => {
+    try {
+      const q = date ? `?date=${date}` : "";
+      const res = await api<{ portal: StaffPortalData }>("GET", `/api/staff/${staffId}/portal${q}`);
+      setStaffPortalData(res.portal);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }, []);
+
   return {
     navigate, isAgent, currentUser, setCurrentUser, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
@@ -588,6 +682,10 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     smsSettings, smsLogs, smsLogsPag, setSmsLogsPage,
     loadSmsSettings, updateSmsSettings, loadSmsLogs,
     sendTestSms, sendAppointmentSms, sendReceiptSms,
+    attendanceSummary, selectedAttendanceDate, setSelectedAttendanceDate,
+    loadAttendance, clockInStaff, clockOutStaff, updateAttendanceRecord, bulkMarkAttendance,
+    staffCommissions, loadStaffCommissions,
+    staffPortalData, loadStaffPortalData,
     clientLookup, staffLookup,
     loading, error, setError,
   };

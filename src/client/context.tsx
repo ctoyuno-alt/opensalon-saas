@@ -3,7 +3,7 @@ import { useContext } from "preact/hooks";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, Invoice, Expense, WhatsAppSettings, WhatsAppLog, SendWhatsAppResult,
-  SmsSettings, SmsLog, SendSmsResult,
+  SmsSettings, SmsLog, SendSmsResult, DayAttendanceSummary, StaffAttendanceRecord, StaffCommission, StaffPortalData,
 } from "./types";
 
 export interface AppContextValue {
@@ -125,6 +125,20 @@ export interface AppContextValue {
   sendTestSms: (phone: string, message: string) => Promise<SendSmsResult>;
   sendAppointmentSms: (appointmentId: number, type: "booking_confirmation" | "reminder" | "reschedule" | "cancellation") => Promise<SendSmsResult>;
   sendReceiptSms: (invoiceId: number) => Promise<SendSmsResult>;
+
+  // Staff Attendance & Commissions
+  attendanceSummary: DayAttendanceSummary | null;
+  selectedAttendanceDate: string;
+  setSelectedAttendanceDate: (date: string) => void;
+  loadAttendance: (date?: string) => Promise<void>;
+  clockInStaff: (staffId: number, time?: string) => Promise<void>;
+  clockOutStaff: (staffId: number, time?: string) => Promise<void>;
+  updateAttendanceRecord: (record: { staff_id: number; work_date: string; status: string; clock_in?: string; clock_out?: string; total_hours?: number; notes?: string }) => Promise<void>;
+  bulkMarkAttendance: (date: string, status: string, staffIds?: number[]) => Promise<void>;
+  staffCommissions: StaffCommission[];
+  loadStaffCommissions: (staffId?: number) => Promise<void>;
+  staffPortalData: StaffPortalData | null;
+  loadStaffPortalData: (staffId: number, date?: string) => Promise<void>;
 
   // Lookups
   clientLookup: ClientLookup[];

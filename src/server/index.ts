@@ -20,6 +20,14 @@ import {
   sendAppointmentSMSNotification,
   sendInvoiceReceiptSMSNotification,
 } from "./sms.js";
+import {
+  getDayAttendance,
+  clockIn,
+  clockOut,
+  upsertAttendance,
+  bulkMarkAttendance,
+  getStaffPortalData,
+} from "./staff-attendance.js";
 
 type Env = { 
   Bindings: { DB: D1Database };
@@ -230,6 +238,51 @@ const StaffCommissionSchema = z.object({
   commission_amount: z.number(),
   created_at: z.string().optional(),
 }).openapi("StaffCommission");
+
+const StaffAttendanceRecordSchema = z.object({
+  id: z.number().int().optional(),
+  staff_id: z.number().int(),
+  staff_name: z.string(),
+  staff_title: z.string().optional().nullable(),
+  staff_color: z.string().optional().nullable(),
+  work_date: z.string(),
+  status: z.string(),
+  clock_in: z.string(),
+  clock_out: z.string(),
+  total_hours: z.number(),
+  notes: z.string(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+}).openapi("StaffAttendanceRecord");
+
+const DayAttendanceSummarySchema = z.object({
+  date: z.string(),
+  total_staff: z.number().int(),
+  present_count: z.number().int(),
+  late_count: z.number().int(),
+  half_day_count: z.number().int(),
+  absent_count: z.number().int(),
+  on_leave_count: z.number().int(),
+  not_marked_count: z.number().int(),
+  records: z.array(StaffAttendanceRecordSchema),
+}).openapi("DayAttendanceSummary");
+
+const StaffPortalSchema = z.object({
+  staff: StaffSchema,
+  todayAttendance: StaffAttendanceRecordSchema.nullable(),
+  todayAppointments: z.array(z.any()),
+  monthCommissions: z.object({
+    total_commission: z.number(),
+    total_service_sales: z.number(),
+    total_product_sales: z.number(),
+    total_items: z.number(),
+  }),
+  commissionsList: z.array(z.any()),
+  monthAttendanceSummary: z.object({
+    days_present: z.number(),
+    total_hours: z.number(),
+  }),
+}).openapi("StaffPortalData");
 
 const InactiveClientAlertSchema = z.object({
   id: z.number().int(),
@@ -1704,6 +1757,8 @@ const createStaff = createRoute({
       phone: z.string().optional(),
       title: z.string().optional(),
       color: z.string().optional(),
+      base_salary: z.number().optional(),
+      commission_percent: z.number().optional(),
     }) } } },
   },
   responses: { 201: { description: "Created", content: { "application/json": { schema: z.object({ staff: StaffSchema }) } } } },
@@ -1712,8 +1767,16 @@ const createStaff = createRoute({
 app.openapi(createStaff, async (c) => {
   const body = c.req.valid("json");
   const result = await run(
-    "INSERT INTO staff (name, email, phone, title, color) VALUES (?, ?, ?, ?, ?)",
-    [body.name, body.email || "", body.phone || "", body.title || "", body.color || "#7c3aed"],
+    "INSERT INTO staff (name, email, phone, title, color, base_salary, commission_percent) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+      body.name,
+      body.email || "",
+      body.phone || "",
+      body.title || "",
+      body.color || "#7c3aed",
+      body.base_salary !== undefined ? String(body.base_salary) : "0",
+      body.commission_percent !== undefined ? String(body.commission_percent) : "10",
+    ],
   );
   const staff = await get<Record<string, unknown>>("SELECT * FROM staff WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ staff }, 201);
@@ -1731,6 +1794,8 @@ const updateStaff = createRoute({
       title: z.string().optional(),
       color: z.string().optional(),
       active: z.number().int().optional(),
+      base_salary: z.number().optional(),
+      commission_percent: z.number().optional(),
     }) } } },
   },
   responses: { 200: { description: "Updated", content: { "application/json": { schema: OkSchema } } } },
@@ -3149,6 +3214,183 @@ app.openapi(listStaffCommissions, async (c) => {
   q += " ORDER BY sc.created_at DESC LIMIT 100";
   const rows = await query<any>(q, params);
   return c.json({ commissions: rows }, 200);
+});
+
+// ── Staff Attendance & Time Clock ─────────────────────────────────────
+
+const getStaffAttendance = createRoute({
+  method: "get",
+  path: "/api/staff-attendance",
+  request: {
+    query: z.object({
+      date: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Day attendance summary",
+      content: { "application/json": { schema: z.object({ summary: DayAttendanceSummarySchema }) } },
+    },
+  },
+});
+
+app.openapi(getStaffAttendance, async (c) => {
+  const { date } = c.req.valid("query");
+  const summary = await getDayAttendance(date);
+  return c.json({ summary }, 200);
+});
+
+const clockInEndpoint = createRoute({
+  method: "post",
+  path: "/api/staff-attendance/clock-in",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            staff_id: z.number().int(),
+            date: z.string().optional(),
+            time: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Clock in result",
+      content: { "application/json": { schema: z.object({ record: StaffAttendanceRecordSchema }) } },
+    },
+  },
+});
+
+app.openapi(clockInEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const record = await clockIn(body);
+  return c.json({ record }, 200);
+});
+
+const clockOutEndpoint = createRoute({
+  method: "post",
+  path: "/api/staff-attendance/clock-out",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            staff_id: z.number().int(),
+            date: z.string().optional(),
+            time: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Clock out result",
+      content: { "application/json": { schema: z.object({ record: StaffAttendanceRecordSchema }) } },
+    },
+  },
+});
+
+app.openapi(clockOutEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const record = await clockOut(body);
+  return c.json({ record }, 200);
+});
+
+const updateAttendanceEndpoint = createRoute({
+  method: "put",
+  path: "/api/staff-attendance",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            staff_id: z.number().int(),
+            work_date: z.string(),
+            status: z.string(),
+            clock_in: z.string().optional(),
+            clock_out: z.string().optional(),
+            total_hours: z.number().optional(),
+            notes: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Updated attendance record",
+      content: { "application/json": { schema: z.object({ record: StaffAttendanceRecordSchema }) } },
+    },
+  },
+});
+
+app.openapi(updateAttendanceEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const record = await upsertAttendance(body);
+  return c.json({ record }, 200);
+});
+
+const bulkAttendanceEndpoint = createRoute({
+  method: "post",
+  path: "/api/staff-attendance/bulk",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            work_date: z.string(),
+            status: z.string(),
+            staff_ids: z.array(z.number().int()).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Bulk attendance summary",
+      content: { "application/json": { schema: z.object({ summary: DayAttendanceSummarySchema }) } },
+    },
+  },
+});
+
+app.openapi(bulkAttendanceEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const summary = await bulkMarkAttendance(body.work_date, body.status, body.staff_ids);
+  return c.json({ summary }, 200);
+});
+
+const getStaffPortalEndpoint = createRoute({
+  method: "get",
+  path: "/api/staff/{id}/portal",
+  request: {
+    params: IdParam,
+    query: z.object({
+      date: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Staff personal portal data",
+      content: { "application/json": { schema: z.object({ portal: StaffPortalSchema }) } },
+    },
+    404: {
+      description: "Staff not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+app.openapi(getStaffPortalEndpoint, async (c) => {
+  const { id } = c.req.valid("param");
+  const { date } = c.req.valid("query");
+  const portal = await getStaffPortalData(id, date);
+  if (!portal) return c.json({ error: "Staff member not found" }, 404);
+  return c.json({ portal }, 200);
 });
 
 export default app;
