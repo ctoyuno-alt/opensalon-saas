@@ -3,6 +3,7 @@ import { useContext } from "preact/hooks";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, Invoice, Expense, WhatsAppSettings, WhatsAppLog, SendWhatsAppResult,
+  SmsSettings, SmsLog, SendSmsResult,
 } from "./types";
 
 export interface AppContextValue {
@@ -112,6 +113,18 @@ export interface AppContextValue {
   sendTestWhatsApp: (phone: string, message: string) => Promise<SendWhatsAppResult>;
   sendAppointmentWhatsApp: (appointmentId: number, type: "booking_confirmation" | "reminder" | "reschedule" | "cancellation") => Promise<SendWhatsAppResult>;
   sendReceiptWhatsApp: (invoiceId: number) => Promise<SendWhatsAppResult>;
+
+  // SMS Gateway
+  smsSettings: SmsSettings | null;
+  smsLogs: SmsLog[];
+  smsLogsPag: PaginatedState;
+  setSmsLogsPage: (page: number) => void;
+  loadSmsSettings: () => Promise<void>;
+  updateSmsSettings: (data: Partial<SmsSettings>) => Promise<void>;
+  loadSmsLogs: (page?: number) => Promise<void>;
+  sendTestSms: (phone: string, message: string) => Promise<SendSmsResult>;
+  sendAppointmentSms: (appointmentId: number, type: "booking_confirmation" | "reminder" | "reschedule" | "cancellation") => Promise<SendSmsResult>;
+  sendReceiptSms: (invoiceId: number) => Promise<SendSmsResult>;
 
   // Lookups
   clientLookup: ClientLookup[];

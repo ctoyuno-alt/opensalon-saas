@@ -11,14 +11,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  Receipt, Plus, Trash2, CreditCard, History, MessageCircle,
+  Receipt, Plus, Trash2, CreditCard, History, MessageCircle, MessageSquare,
   Tag, Sparkles, Check, AlertCircle, RefreshCw, Crown
 } from "lucide-preact";
 import type { InvoiceItem, Coupon, ClientMembership } from "../types";
 import { Pagination } from "./pagination";
 
 export function PosBilling() {
-  const { clients, services, products, createInvoice, invoices, invoicesPag, setInvoicesPage, clientLookup, sendReceiptWhatsApp } = useApp();
+  const { clients, services, products, createInvoice, invoices, invoicesPag, setInvoicesPage, clientLookup, sendReceiptWhatsApp, sendReceiptSms } = useApp();
   const [clientId, setClientId] = useState<string>("");
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [discount, setDiscount] = useState(0);
@@ -289,6 +289,15 @@ export function PosBilling() {
       alert(res.status === "simulated" ? "Simulated WhatsApp receipt logged! (Check WhatsApp tab)" : "WhatsApp receipt dispatched!");
     } catch (e: any) {
       alert("Failed to send WhatsApp receipt: " + e.message);
+    }
+  };
+
+  const handleSendSmsReceipt = async (invId: number) => {
+    try {
+      const res = await sendReceiptSms(invId);
+      alert(res.status === "simulated" ? "Simulated SMS receipt logged! (Check SMS Hub tab)" : "SMS receipt dispatched!");
+    } catch (e: any) {
+      alert("Failed to send SMS receipt: " + e.message);
     }
   };
 
@@ -699,7 +708,7 @@ export function PosBilling() {
                     <TableHead>Discounts &amp; Coupon</TableHead>
                     <TableHead>Total Paid</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">WhatsApp</TableHead>
+                    <TableHead className="text-right">Receipts</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -742,16 +751,28 @@ export function PosBilling() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 gap-1 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                            onClick={() => handleSendReceipt(inv.id)}
-                            title="Send WhatsApp Receipt"
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
-                            Receipt
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 gap-1 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                              onClick={() => handleSendReceipt(inv.id)}
+                              title="Send WhatsApp Receipt"
+                            >
+                              <MessageCircle className="h-3.5 w-3.5" />
+                              WA
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 gap-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                              onClick={() => handleSendSmsReceipt(inv.id)}
+                              title="Send SMS Receipt"
+                            >
+                              <MessageSquare className="h-3.5 w-3.5" />
+                              SMS
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

@@ -12,6 +12,14 @@ import {
   sendInvoiceReceiptNotification,
   createWaMeUrl,
 } from "./whatsapp.js";
+import {
+  getSmsSettings,
+  updateSmsSettings,
+  listSmsLogs,
+  sendSMSMessage,
+  sendAppointmentSMSNotification,
+  sendInvoiceReceiptSMSNotification,
+} from "./sms.js";
 
 type Env = { 
   Bindings: { DB: D1Database };
@@ -416,6 +424,72 @@ const WhatsAppSendResultSchema = z.object({
   content: z.string(),
   recipientPhone: z.string(),
 }).openapi("WhatsAppSendResult");
+
+const SmsSettingsSchema = z.object({
+  id: z.number().int(),
+  provider: z.enum(["simulation", "twilio", "fast2sms"]),
+  twilio_account_sid: z.string().optional().default(""),
+  twilio_auth_token: z.string().optional().default(""),
+  twilio_phone_number: z.string().optional().default(""),
+  fast2sms_api_key: z.string().optional().default(""),
+  fast2sms_route: z.string().optional().default("q"),
+  sender_id: z.string().optional().default("SALON"),
+  salon_name: z.string(),
+  auto_send_booking_confirmation: z.number().int(),
+  auto_send_reschedule: z.number().int(),
+  auto_send_cancellation: z.number().int(),
+  auto_send_receipt: z.number().int(),
+  template_booking_confirmation: z.string(),
+  template_reminder: z.string(),
+  template_reschedule: z.string(),
+  template_cancellation: z.string(),
+  template_receipt: z.string(),
+  updated_at: z.string().optional(),
+}).openapi("SmsSettings");
+
+const UpdateSmsSettingsSchema = z.object({
+  provider: z.enum(["simulation", "twilio", "fast2sms"]).optional(),
+  twilio_account_sid: z.string().optional(),
+  twilio_auth_token: z.string().optional(),
+  twilio_phone_number: z.string().optional(),
+  fast2sms_api_key: z.string().optional(),
+  fast2sms_route: z.string().optional(),
+  sender_id: z.string().optional(),
+  salon_name: z.string().optional(),
+  auto_send_booking_confirmation: z.number().int().optional(),
+  auto_send_reschedule: z.number().int().optional(),
+  auto_send_cancellation: z.number().int().optional(),
+  auto_send_receipt: z.number().int().optional(),
+  template_booking_confirmation: z.string().optional(),
+  template_reminder: z.string().optional(),
+  template_reschedule: z.string().optional(),
+  template_cancellation: z.string().optional(),
+  template_receipt: z.string().optional(),
+}).openapi("UpdateSmsSettings");
+
+const SmsLogSchema = z.object({
+  id: z.number().int(),
+  recipient_phone: z.string(),
+  recipient_name: z.string(),
+  message_type: z.string(),
+  content: z.string(),
+  status: z.enum(["sent", "delivered", "failed", "simulated"]),
+  provider: z.string(),
+  external_id: z.string(),
+  error_message: z.string(),
+  reference_id: z.number().int().nullable(),
+  created_at: z.string(),
+}).openapi("SmsLog");
+
+const SmsSendResultSchema = z.object({
+  success: z.boolean(),
+  status: z.enum(["sent", "simulated", "failed"]),
+  messageId: z.string().optional(),
+  error: z.string().optional(),
+  content: z.string(),
+  recipientPhone: z.string(),
+  segments: z.number().optional(),
+}).openapi("SmsSendResult");
 
 const IdParam = z.object({ id: z.string().openapi({ description: "Resource ID" }) });
 
@@ -874,6 +948,15 @@ app.openapi(createInvoice, async (c) => {
     console.error("Auto WhatsApp receipt error:", err);
   }
 
+  try {
+    const smsSettings = await getSmsSettings();
+    if (data.status === "paid" && smsSettings.auto_send_receipt) {
+      await sendInvoiceReceiptSMSNotification(Number(invoiceId));
+    }
+  } catch (err) {
+    console.error("Auto SMS receipt error:", err);
+  }
+
   return c.json({ invoice: { ...newInvoice, items: newItems } }, 200);
 });
 
@@ -1244,6 +1327,15 @@ app.openapi(createAppointment, async (c) => {
     console.error("Auto WhatsApp confirmation error:", err);
   }
 
+  try {
+    const smsSettings = await getSmsSettings();
+    if (smsSettings.auto_send_booking_confirmation) {
+      await sendAppointmentSMSNotification(aptId, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto SMS confirmation error:", err);
+  }
+
   return c.json({ appointment: apt }, 201);
 });
 
@@ -1338,6 +1430,17 @@ app.openapi(updateAppointment, async (c) => {
     }
   } catch (err) {
     console.error("Auto WhatsApp update error:", err);
+  }
+
+  try {
+    const smsSettings = await getSmsSettings();
+    if (body.status === "cancelled" && existing.status !== "cancelled" && smsSettings.auto_send_cancellation) {
+      await sendAppointmentSMSNotification(Number(id), "cancellation");
+    } else if (moved && status !== "cancelled" && smsSettings.auto_send_reschedule) {
+      await sendAppointmentSMSNotification(Number(id), "reschedule");
+    }
+  } catch (err) {
+    console.error("Auto SMS update error:", err);
   }
 
   return c.json({ ok: true }, 200);
@@ -2083,6 +2186,15 @@ app.openapi(publicBook, async (c) => {
   } catch (err) {
     console.error("Auto WhatsApp public booking confirmation error:", err);
   }
+
+  try {
+    const smsSettings = await getSmsSettings();
+    if (smsSettings.auto_send_booking_confirmation) {
+      await sendAppointmentSMSNotification(apt.id, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto SMS public booking confirmation error:", err);
+  }
   
   return c.json({ ok: true, appointment_id: apt.id }, 200);
 });
@@ -2258,6 +2370,183 @@ const sendReceiptWhatsAppEndpoint = createRoute({
 app.openapi(sendReceiptWhatsAppEndpoint, async (c) => {
   const { invoice_id } = c.req.valid("json");
   const result = await sendInvoiceReceiptNotification(invoice_id);
+  if (!result) {
+    return c.json({ error: "Invoice not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+
+// ── SMS Endpoints ──────────────────────────────────────────────────
+
+const getSmsSettingsEndpoint = createRoute({
+  method: "get",
+  path: "/api/sms/settings",
+  responses: {
+    200: {
+      description: "SMS gateway settings",
+      content: { "application/json": { schema: z.object({ settings: SmsSettingsSchema }) } },
+    },
+  },
+});
+
+app.openapi(getSmsSettingsEndpoint, async (c) => {
+  const settings = await getSmsSettings();
+  return c.json({ settings }, 200);
+});
+
+const updateSmsSettingsEndpoint = createRoute({
+  method: "put",
+  path: "/api/sms/settings",
+  request: {
+    body: { content: { "application/json": { schema: UpdateSmsSettingsSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Updated SMS settings",
+      content: { "application/json": { schema: z.object({ settings: SmsSettingsSchema }) } },
+    },
+  },
+});
+
+app.openapi(updateSmsSettingsEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const settings = await updateSmsSettings(body);
+  return c.json({ settings }, 200);
+});
+
+const getSmsLogsEndpoint = createRoute({
+  method: "get",
+  path: "/api/sms/logs",
+  request: {
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "SMS message logs",
+      content: {
+        "application/json": {
+          schema: z.object({
+            logs: z.array(SmsLogSchema),
+            total: z.number(),
+            page: z.number(),
+            limit: z.number(),
+          }),
+        },
+      },
+    },
+  },
+});
+
+app.openapi(getSmsLogsEndpoint, async (c) => {
+  const { page, limit } = c.req.valid("query");
+  const p = Math.max(1, parseInt(page || "1", 10) || 1);
+  const l = Math.min(100, Math.max(1, parseInt(limit || "20", 10) || 20));
+  const res = await listSmsLogs(p, l);
+  return c.json(res, 200);
+});
+
+const sendTestSmsEndpoint = createRoute({
+  method: "post",
+  path: "/api/sms/send-test",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            phone: z.string(),
+            message: z.string(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Test SMS message result",
+      content: { "application/json": { schema: z.object({ result: SmsSendResultSchema }) } },
+    },
+  },
+});
+
+app.openapi(sendTestSmsEndpoint, async (c) => {
+  const { phone, message } = c.req.valid("json");
+  const result = await sendSMSMessage({
+    recipientPhone: phone,
+    recipientName: "Test Recipient",
+    messageType: "test",
+    content: message,
+  });
+  return c.json({ result }, 200);
+});
+
+const sendAppointmentSmsEndpoint = createRoute({
+  method: "post",
+  path: "/api/sms/send-appointment",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            appointment_id: z.number().int(),
+            type: z.enum(["booking_confirmation", "reminder", "reschedule", "cancellation"]),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Appointment SMS message result",
+      content: { "application/json": { schema: z.object({ result: SmsSendResultSchema.nullable() }) } },
+    },
+    404: {
+      description: "Appointment not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+app.openapi(sendAppointmentSmsEndpoint, async (c) => {
+  const { appointment_id, type } = c.req.valid("json");
+  const result = await sendAppointmentSMSNotification(appointment_id, type);
+  if (!result) {
+    return c.json({ error: "Appointment not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+
+const sendReceiptSmsEndpoint = createRoute({
+  method: "post",
+  path: "/api/sms/send-receipt",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            invoice_id: z.number().int(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Receipt SMS message result",
+      content: { "application/json": { schema: z.object({ result: SmsSendResultSchema.nullable() }) } },
+    },
+    404: {
+      description: "Invoice not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+app.openapi(sendReceiptSmsEndpoint, async (c) => {
+  const { invoice_id } = c.req.valid("json");
+  const result = await sendInvoiceReceiptSMSNotification(invoice_id);
   if (!result) {
     return c.json({ error: "Invoice not found or client has no phone number" }, 404);
   }

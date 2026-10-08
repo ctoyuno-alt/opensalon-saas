@@ -3,12 +3,12 @@
 // export dynamically through wrangler, or we can potentially let users directly
 // add them as a sort of "plugin" system.
 
-import ENTRY, { __INTERNAL_WRANGLER_MIDDLEWARE__ } from "D:\\main-data\\opensalon\\.wrangler\\tmp\\bundle-qlfv8N\\middleware-insertion-facade.js";
-import { __facade_invoke__, __facade_register__, Dispatcher } from "D:\\main-data\\opensalon\\node_modules\\.pnpm\\wrangler@4.93.1\\node_modules\\wrangler\\templates\\middleware\\common.ts";
-import type { WorkerEntrypointConstructor } from "D:\\main-data\\opensalon\\.wrangler\\tmp\\bundle-qlfv8N\\middleware-insertion-facade.js";
+import ENTRY, { __INTERNAL_WRANGLER_MIDDLEWARE__ } from "/home/it/projects/opensalon-saas/.wrangler/tmp/bundle-TTn6TT/middleware-insertion-facade.js";
+import { __facade_invoke__, __facade_register__, Dispatcher } from "/home/it/projects/opensalon-saas/node_modules/.pnpm/wrangler@4.93.1/node_modules/wrangler/templates/middleware/common.ts";
+import type { WorkerEntrypointConstructor } from "/home/it/projects/opensalon-saas/.wrangler/tmp/bundle-TTn6TT/middleware-insertion-facade.js";
 
 // Preserve all the exports from the worker
-export * from "D:\\main-data\\opensalon\\.wrangler\\tmp\\bundle-qlfv8N\\middleware-insertion-facade.js";
+export * from "/home/it/projects/opensalon-saas/.wrangler/tmp/bundle-TTn6TT/middleware-insertion-facade.js";
 
 class __Facade_ScheduledController__ implements ScheduledController {
 	readonly #noRetry: ScheduledController["noRetry"];

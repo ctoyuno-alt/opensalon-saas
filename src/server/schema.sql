@@ -228,6 +228,47 @@ CREATE TABLE IF NOT EXISTS whatsapp_logs (
 CREATE INDEX IF NOT EXISTS idx_whatsapp_logs_created ON whatsapp_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_logs_recipient ON whatsapp_logs(recipient_phone);
 
+-- SMS Settings & Gateway Configuration
+CREATE TABLE IF NOT EXISTS sms_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  provider TEXT NOT NULL DEFAULT 'simulation', -- 'simulation', 'twilio', 'fast2sms'
+  twilio_account_sid TEXT DEFAULT '',
+  twilio_auth_token TEXT DEFAULT '',
+  twilio_phone_number TEXT DEFAULT '',
+  fast2sms_api_key TEXT DEFAULT '',
+  fast2sms_route TEXT DEFAULT 'q', -- 'q' (quick), 'dlt', 'otp'
+  sender_id TEXT DEFAULT 'SALON',
+  salon_name TEXT DEFAULT 'OpenSalon',
+  auto_send_booking_confirmation INTEGER NOT NULL DEFAULT 1,
+  auto_send_reschedule INTEGER NOT NULL DEFAULT 1,
+  auto_send_cancellation INTEGER NOT NULL DEFAULT 1,
+  auto_send_receipt INTEGER NOT NULL DEFAULT 1,
+  template_booking_confirmation TEXT DEFAULT 'Hi {{client_name}}, your booking at {{salon_name}} for {{service_name}} on {{date}} at {{time}} is confirmed! Total: ${{total}}.',
+  template_reminder TEXT DEFAULT 'Reminder from {{salon_name}}: You have an appointment for {{service_name}} on {{date}} at {{time}} with {{staff_name}}.',
+  template_reschedule TEXT DEFAULT 'Hi {{client_name}}, your appointment at {{salon_name}} has been rescheduled to {{date}} at {{time}} with {{staff_name}}.',
+  template_cancellation TEXT DEFAULT 'Hi {{client_name}}, your appointment at {{salon_name}} for {{date}} at {{time}} has been cancelled.',
+  template_receipt TEXT DEFAULT 'Thank you for visiting {{salon_name}}, {{client_name}}! Receipt for Invoice #{{invoice_id}}: Paid ${{total}} via {{payment_method}}.',
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- SMS Message Delivery Logs
+CREATE TABLE IF NOT EXISTS sms_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipient_phone TEXT NOT NULL,
+  recipient_name TEXT DEFAULT '',
+  message_type TEXT NOT NULL, -- 'booking_confirmation', 'reminder', 'reschedule', 'cancellation', 'receipt', 'test', 'custom'
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent', -- 'sent', 'delivered', 'failed', 'simulated'
+  provider TEXT NOT NULL DEFAULT 'simulation',
+  external_id TEXT DEFAULT '',
+  error_message TEXT DEFAULT '',
+  reference_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_logs_created ON sms_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_sms_logs_recipient ON sms_logs(recipient_phone);
+
 -- ── Memberships & Packages ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS memberships (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,4 +1,4 @@
-export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses" | "whatsapp" | "growth" | "memberships";
+export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staff" | "services" | "products" | "pos" | "expenses" | "whatsapp" | "sms" | "growth" | "memberships";
 
 export interface User {
   id: number;
@@ -241,6 +241,52 @@ export interface SendWhatsAppResult {
   waMeUrl: string;
   content: string;
   recipientPhone: string;
+}
+
+export interface SmsSettings {
+  id: number;
+  provider: "simulation" | "twilio" | "fast2sms";
+  twilio_account_sid: string;
+  twilio_auth_token: string;
+  twilio_phone_number: string;
+  fast2sms_api_key: string;
+  fast2sms_route: string;
+  sender_id: string;
+  salon_name: string;
+  auto_send_booking_confirmation: number;
+  auto_send_reschedule: number;
+  auto_send_cancellation: number;
+  auto_send_receipt: number;
+  template_booking_confirmation: string;
+  template_reminder: string;
+  template_reschedule: string;
+  template_cancellation: string;
+  template_receipt: string;
+  updated_at?: string;
+}
+
+export interface SmsLog {
+  id: number;
+  recipient_phone: string;
+  recipient_name: string;
+  message_type: string;
+  content: string;
+  status: "sent" | "delivered" | "failed" | "simulated";
+  provider: string;
+  external_id: string;
+  error_message: string;
+  reference_id: number | null;
+  created_at: string;
+}
+
+export interface SendSmsResult {
+  success: boolean;
+  status: "sent" | "simulated" | "failed";
+  messageId?: string;
+  error?: string;
+  content: string;
+  recipientPhone: string;
+  segments?: number;
 }
 
 export interface Membership {

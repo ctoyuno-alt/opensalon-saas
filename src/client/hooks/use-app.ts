@@ -4,6 +4,7 @@ import { today } from "../lib/dates";
 import type {
   User, Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, Invoice, Expense, WhatsAppSettings, WhatsAppLog, SendWhatsAppResult,
+  SmsSettings, SmsLog, SendSmsResult,
 } from "../types";
 import type { AppContextValue } from "../context";
 
@@ -56,6 +57,11 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const [whatsappSettings, setWhatsappSettings] = useState<WhatsAppSettings | null>(null);
   const [whatsappLogs, setWhatsappLogs] = useState<WhatsAppLog[]>([]);
   const [whatsappLogsPag, setWhatsappLogsPag] = useState<PaginatedState>({ page: 1, limit: 20, total: 0 });
+
+  // SMS
+  const [smsSettings, setSmsSettings] = useState<SmsSettings | null>(null);
+  const [smsLogs, setSmsLogs] = useState<SmsLog[]>([]);
+  const [smsLogsPag, setSmsLogsPag] = useState<PaginatedState>({ page: 1, limit: 20, total: 0 });
 
   // Lookups
   const [clientLookup, setClientLookup] = useState<ClientLookup[]>([]);
@@ -489,6 +495,75 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     return res.result;
   }, [whatsappLogsPag, fetchWhatsAppLogs]);
 
+  // ── SMS Actions ──
+
+  const fetchSmsSettings = useCallback(async () => {
+    try {
+      const data = await api<{ settings: SmsSettings }>("GET", "/api/sms/settings");
+      setSmsSettings(data.settings);
+    } catch (e: any) {
+      console.error("Failed to load SMS settings:", e);
+    }
+  }, []);
+
+  const fetchSmsLogs = useCallback(async (pag: PaginatedState) => {
+    try {
+      const data = await api<{ logs: SmsLog[]; total: number; page: number; limit: number }>(
+        "GET",
+        `/api/sms/logs?page=${pag.page}&limit=${pag.limit}`
+      );
+      setSmsLogs(data.logs);
+      setSmsLogsPag((p) => ({ ...p, total: data.total }));
+    } catch (e: any) {
+      console.error("Failed to load SMS logs:", e);
+    }
+  }, []);
+
+  const loadSmsSettings = useCallback(async () => {
+    await fetchSmsSettings();
+  }, [fetchSmsSettings]);
+
+  const updateSmsSettings = useCallback(async (data: Partial<SmsSettings>) => {
+    const res = await api<{ settings: SmsSettings }>("PUT", "/api/sms/settings", data);
+    setSmsSettings(res.settings);
+  }, []);
+
+  const loadSmsLogs = useCallback(async (page?: number) => {
+    const targetPag = page !== undefined ? { ...smsLogsPag, page } : smsLogsPag;
+    if (page !== undefined) setSmsLogsPag(targetPag);
+    await fetchSmsLogs(targetPag);
+  }, [smsLogsPag, fetchSmsLogs]);
+
+  const setSmsLogsPage = useCallback((page: number) => {
+    setSmsLogsPag((p) => ({ ...p, page }));
+  }, []);
+
+  const sendTestSms = useCallback(async (phone: string, message: string): Promise<SendSmsResult> => {
+    const res = await api<{ result: SendSmsResult }>("POST", "/api/sms/send-test", { phone, message });
+    await fetchSmsLogs(smsLogsPag);
+    return res.result;
+  }, [smsLogsPag, fetchSmsLogs]);
+
+  const sendAppointmentSms = useCallback(async (
+    appointmentId: number,
+    type: "booking_confirmation" | "reminder" | "reschedule" | "cancellation"
+  ): Promise<SendSmsResult> => {
+    const res = await api<{ result: SendSmsResult }>("POST", "/api/sms/send-appointment", {
+      appointment_id: appointmentId,
+      type,
+    });
+    await fetchSmsLogs(smsLogsPag);
+    return res.result;
+  }, [smsLogsPag, fetchSmsLogs]);
+
+  const sendReceiptSms = useCallback(async (invoiceId: number): Promise<SendSmsResult> => {
+    const res = await api<{ result: SendSmsResult }>("POST", "/api/sms/send-receipt", {
+      invoice_id: invoiceId,
+    });
+    await fetchSmsLogs(smsLogsPag);
+    return res.result;
+  }, [smsLogsPag, fetchSmsLogs]);
+
   return {
     navigate, isAgent, currentUser, setCurrentUser, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
@@ -510,6 +585,9 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     whatsappSettings, whatsappLogs, whatsappLogsPag, setWhatsAppLogsPage,
     loadWhatsAppSettings, updateWhatsAppSettings, loadWhatsAppLogs,
     sendTestWhatsApp, sendAppointmentWhatsApp, sendReceiptWhatsApp,
+    smsSettings, smsLogs, smsLogsPag, setSmsLogsPage,
+    loadSmsSettings, updateSmsSettings, loadSmsLogs,
+    sendTestSms, sendAppointmentSms, sendReceiptSms,
     clientLookup, staffLookup,
     loading, error, setError,
   };

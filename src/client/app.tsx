@@ -16,6 +16,7 @@ import { ProductList } from "./components/product-list";
 import { PosBilling } from "./components/pos";
 import { Expenses } from "./components/expenses";
 import { WhatsAppHub } from "./components/whatsapp-hub";
+import { SmsHub } from "./components/sms-hub";
 import { GrowthDashboard } from "./components/growth-dashboard";
 import { MembershipsHub } from "./components/memberships-hub";
 import { ErrorBanner } from "./components/error-banner";
@@ -63,6 +64,7 @@ export function App() {
       case "pos": return <PosBilling />;
       case "expenses": return <Expenses />;
       case "whatsapp": return <WhatsAppHub />;
+      case "sms": return <SmsHub />;
       case "growth": return <GrowthDashboard />;
       case "memberships": return <MembershipsHub />;
       default: return <Dashboard />;

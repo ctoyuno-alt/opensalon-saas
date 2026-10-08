@@ -81,6 +81,7 @@ export async function ensureSeeded(): Promise<void> {
     await seedIfEmpty("products", ["id", "name", "brand", "category", "price", "cost", "stock"], PRODUCTS);
     await seedIfEmpty("users", ["id", "username", "password_hash", "role"], USERS);
     await run("INSERT OR IGNORE INTO whatsapp_settings (id, provider) VALUES (1, 'meta')");
+    await run("INSERT OR IGNORE INTO sms_settings (id, provider) VALUES (1, 'simulation')");
     await run(`INSERT OR IGNORE INTO memberships (id, name, description, price, duration_days, service_discount_percent, product_discount_percent, included_services_count, bonus_loyalty_points)
       VALUES 
         (1, 'GOLD VIP', '12 Haircuts/year + 10% off services + 15% off products', 4999, 365, 10, 15, 12, 500),

@@ -268,7 +268,7 @@ var PerformanceObserver = class {
 };
 var performance = globalThis.performance && "addEventListener" in globalThis.performance ? globalThis.performance : new Performance();
 
-// node_modules/.pnpm/@cloudflare+unenv-preset@2._d77adee0efab442ded9b210dd17c5407/node_modules/@cloudflare/unenv-preset/dist/runtime/polyfill/performance.mjs
+// node_modules/.pnpm/@cloudflare+unenv-preset@2.16.1_unenv@2.0.0-rc.24_workerd@1.20260520.1/node_modules/@cloudflare/unenv-preset/dist/runtime/polyfill/performance.mjs
 if (!("__unenv__" in performance)) {
   const proto = Performance.prototype;
   for (const key of Object.getOwnPropertyNames(proto)) {
@@ -328,7 +328,7 @@ var _times = /* @__PURE__ */ new Map();
 var _stdoutErrorHandler = noop_default;
 var _stderrErrorHandler = noop_default;
 
-// node_modules/.pnpm/@cloudflare+unenv-preset@2._d77adee0efab442ded9b210dd17c5407/node_modules/@cloudflare/unenv-preset/dist/runtime/node/console.mjs
+// node_modules/.pnpm/@cloudflare+unenv-preset@2.16.1_unenv@2.0.0-rc.24_workerd@1.20260520.1/node_modules/@cloudflare/unenv-preset/dist/runtime/node/console.mjs
 var workerdConsole = globalThis["console"];
 var {
   assert,
@@ -699,7 +699,7 @@ var Process = class _Process extends EventEmitter {
   _linkedBinding = void 0;
 };
 
-// node_modules/.pnpm/@cloudflare+unenv-preset@2._d77adee0efab442ded9b210dd17c5407/node_modules/@cloudflare/unenv-preset/dist/runtime/node/process.mjs
+// node_modules/.pnpm/@cloudflare+unenv-preset@2.16.1_unenv@2.0.0-rc.24_workerd@1.20260520.1/node_modules/@cloudflare/unenv-preset/dist/runtime/node/process.mjs
 var globalProcess = globalThis["process"];
 var getBuiltinModule = globalProcess.getBuiltinModule;
 var workerdProcess = getBuiltinModule("node:process");
@@ -8948,7 +8948,7 @@ function isFormContentType(contentType) {
 }
 __name(isFormContentType, "isFormContentType");
 
-// node_modules/.pnpm/@clawnify+routes@0.2.2_@hon_e4e72f33ff58d0db3c127d0799ff2694/node_modules/@clawnify/routes/dist/index.js
+// node_modules/.pnpm/@clawnify+routes@0.2.2_@hono+zod-openapi@0.18.4_hono@4.12.10_zod@3.25.76__hono@4.12.10/node_modules/@clawnify/routes/dist/index.js
 function openApiDocFn(app2) {
   const fn = app2.getOpenAPI31Document;
   return typeof fn === "function" ? fn.bind(app2) : void 0;
@@ -9180,7 +9180,7 @@ function storageImpl(s) {
 }
 __name(storageImpl, "storageImpl");
 
-// node_modules/.pnpm/@clawnify+app@0.2.1_@hono+z_6116bcbf8a1adab4138c3aa4c44b5fdc/node_modules/@clawnify/app/dist/index.js
+// node_modules/.pnpm/@clawnify+app@0.2.1_@hono+zod-openapi@0.18.4_hono@4.12.10_zod@3.25.76__@phosphor-icons+_6116bcbf8a1adab4138c3aa4c44b5fdc/node_modules/@clawnify/app/dist/index.js
 function createApp(opts = {}) {
   const app2 = new OpenAPIHono();
   if (opts.db !== false) {
@@ -9891,12 +9891,793 @@ async function ensureSeeded() {
     await seedIfEmpty("clients", ["id", "name", "email", "phone"], CLIENTS);
     await seedIfEmpty("products", ["id", "name", "brand", "category", "price", "cost", "stock"], PRODUCTS);
     await seedIfEmpty("users", ["id", "username", "password_hash", "role"], USERS);
+    await run("INSERT OR IGNORE INTO whatsapp_settings (id, provider) VALUES (1, 'meta')");
+    await run("INSERT OR IGNORE INTO sms_settings (id, provider) VALUES (1, 'simulation')");
+    await run(`INSERT OR IGNORE INTO memberships (id, name, description, price, duration_days, service_discount_percent, product_discount_percent, included_services_count, bonus_loyalty_points)
+      VALUES 
+        (1, 'GOLD VIP', '12 Haircuts/year + 10% off services + 15% off products', 4999, 365, 10, 15, 12, 500),
+        (2, 'SILVER CLUB', '6 Haircuts/year + 5% off services + 10% off products', 2499, 180, 5, 10, 6, 250)`);
+    await run(`INSERT OR IGNORE INTO coupons (id, code, description, discount_type, discount_value, min_order_amount, is_active)
+      VALUES
+        (1, 'COMEBACK200', 'Special \u20B9200 OFF on your comeback visit!', 'flat', 200, 500, 1),
+        (2, 'MONDAY50', '50% OFF on Monday slow-hours booking', 'percent', 50, 400, 1),
+        (3, 'WELCOME15', '15% OFF on first visit', 'percent', 15, 300, 1)`);
+    try {
+      await run("ALTER TABLE invoices ADD COLUMN membership_discount REAL NOT NULL DEFAULT 0");
+    } catch {
+    }
+    try {
+      await run("ALTER TABLE invoices ADD COLUMN membership_services_deducted INTEGER NOT NULL DEFAULT 0");
+    } catch {
+    }
     seeded = true;
   } catch {
     seeded = false;
   }
 }
 __name(ensureSeeded, "ensureSeeded");
+
+// src/server/whatsapp-helpers.ts
+function cleanPhone(raw2) {
+  if (!raw2) return "";
+  let cleaned = raw2.trim().replace(/[^\d+]/g, "");
+  if (cleaned.startsWith("+")) cleaned = cleaned.substring(1);
+  cleaned = cleaned.replace(/^0+/, "");
+  return cleaned;
+}
+__name(cleanPhone, "cleanPhone");
+function createWaMeUrl(phone, text) {
+  const digits = cleanPhone(phone);
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+__name(createWaMeUrl, "createWaMeUrl");
+function interpolateTemplate(template, vars) {
+  if (!template) return "";
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    const val = vars[key];
+    return val !== void 0 && val !== null ? String(val) : "";
+  });
+}
+__name(interpolateTemplate, "interpolateTemplate");
+
+// src/server/whatsapp.ts
+async function getWhatsAppSettings() {
+  const row = await get("SELECT * FROM whatsapp_settings WHERE id = 1");
+  if (row) return row;
+  await run("INSERT OR IGNORE INTO whatsapp_settings (id, provider) VALUES (1, 'meta')");
+  const fallback = await get("SELECT * FROM whatsapp_settings WHERE id = 1");
+  if (fallback) return fallback;
+  return {
+    id: 1,
+    provider: "meta",
+    phone_number_id: "",
+    access_token: "",
+    business_account_id: "",
+    sender_phone_number: "",
+    twilio_account_sid: "",
+    twilio_auth_token: "",
+    twilio_phone_number: "+14155238886",
+    twilio_content_sid: "",
+    salon_name: "OpenSalon",
+    auto_send_booking_confirmation: 1,
+    auto_send_reschedule: 1,
+    auto_send_cancellation: 1,
+    auto_send_receipt: 1,
+    template_booking_confirmation: "Hi {{client_name}}, your appointment at {{salon_name}} for {{service_name}} on {{date}} at {{time}} with {{staff_name}} is confirmed! Total: ${{total}}. See you soon!",
+    template_reminder: "Friendly reminder from {{salon_name}}: You have an upcoming appointment for {{service_name}} on {{date}} at {{time}} with {{staff_name}}. Reply YES to confirm.",
+    template_reschedule: "Hi {{client_name}}, your appointment at {{salon_name}} has been rescheduled to {{date}} at {{time}} with {{staff_name}}.",
+    template_cancellation: "Hi {{client_name}}, your appointment at {{salon_name}} for {{date}} at {{time}} has been cancelled. Please reach out to reschedule!",
+    template_receipt: "Thank you for visiting {{salon_name}}, {{client_name}}! Here is your receipt for Invoice #{{invoice_id}}: Total paid ${{total}} via {{payment_method}}.",
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+__name(getWhatsAppSettings, "getWhatsAppSettings");
+async function updateWhatsAppSettings(data) {
+  const fields = [];
+  const values = [];
+  const allowed = [
+    "provider",
+    "phone_number_id",
+    "access_token",
+    "business_account_id",
+    "sender_phone_number",
+    "twilio_account_sid",
+    "twilio_auth_token",
+    "twilio_phone_number",
+    "twilio_content_sid",
+    "salon_name",
+    "auto_send_booking_confirmation",
+    "auto_send_reschedule",
+    "auto_send_cancellation",
+    "auto_send_receipt",
+    "template_booking_confirmation",
+    "template_reminder",
+    "template_reschedule",
+    "template_cancellation",
+    "template_receipt"
+  ];
+  for (const key of allowed) {
+    if (data[key] !== void 0) {
+      fields.push(`${key} = ?`);
+      values.push(data[key]);
+    }
+  }
+  if (fields.length > 0) {
+    fields.push("updated_at = datetime('now')");
+    await run(`UPDATE whatsapp_settings SET ${fields.join(", ")} WHERE id = 1`, values);
+  }
+  return getWhatsAppSettings();
+}
+__name(updateWhatsAppSettings, "updateWhatsAppSettings");
+async function listWhatsAppLogs(page = 1, limit = 20) {
+  const offset = (page - 1) * limit;
+  const countRow = await get("SELECT COUNT(*) as count FROM whatsapp_logs");
+  const total = countRow?.count ?? 0;
+  const rows = await query(
+    "SELECT * FROM whatsapp_logs ORDER BY id DESC LIMIT ? OFFSET ?",
+    [limit, offset]
+  );
+  return { logs: rows ?? [], total, page, limit };
+}
+__name(listWhatsAppLogs, "listWhatsAppLogs");
+async function sendWhatsAppMessage(params) {
+  const { recipientPhone, recipientName = "", messageType, content, referenceId } = params;
+  const settings = await getWhatsAppSettings();
+  const digits = cleanPhone(recipientPhone);
+  const waMeUrl = createWaMeUrl(recipientPhone, content);
+  if (!digits) {
+    return {
+      success: false,
+      status: "failed",
+      error: "Recipient phone number is invalid or empty",
+      waMeUrl,
+      content,
+      recipientPhone
+    };
+  }
+  if (settings.provider === "simulation") {
+    await run(
+      "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [digits, recipientName, messageType, content, "simulated", "simulation", referenceId ?? null]
+    );
+    return {
+      success: true,
+      status: "simulated",
+      waMeUrl,
+      content,
+      recipientPhone: digits
+    };
+  }
+  if (settings.provider === "twilio") {
+    if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "simulated", "twilio", referenceId ?? null]
+      );
+      return {
+        success: true,
+        status: "simulated",
+        waMeUrl,
+        content,
+        recipientPhone: digits
+      };
+    }
+    try {
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/Messages.json`;
+      const rawFrom = (settings.twilio_phone_number || "+14155238886").trim();
+      const fromNumber = rawFrom.startsWith("whatsapp:") ? rawFrom : `whatsapp:${rawFrom.startsWith("+") ? rawFrom : `+${rawFrom}`}`;
+      const toNumber = `whatsapp:+${digits}`;
+      const basicAuth = btoa(`${settings.twilio_account_sid}:${settings.twilio_auth_token}`);
+      const formParams = new URLSearchParams();
+      formParams.append("From", fromNumber);
+      formParams.append("To", toNumber);
+      if (settings.twilio_content_sid?.trim()) {
+        formParams.append("ContentSid", settings.twilio_content_sid.trim());
+        formParams.append("ContentVariables", JSON.stringify({ "1": content }));
+      } else {
+        formParams.append("Body", content);
+      }
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: formParams.toString()
+      });
+      const data = await response.json();
+      if (response.ok && data.sid) {
+        await run(
+          "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, external_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "sent", "twilio", data.sid, referenceId ?? null]
+        );
+        return {
+          success: true,
+          status: "sent",
+          messageId: data.sid,
+          waMeUrl,
+          content,
+          recipientPhone: digits
+        };
+      } else {
+        let errorMsg = data?.message || `Twilio error ${data?.code || response.status}`;
+        if (errorMsg.includes("ContentSid Required")) {
+          errorMsg = "ContentSid Required: Recipient phone has not joined Twilio Sandbox (send 'join <code-word>' to +1 415 523 8886) or an approved ContentSid is required.";
+        }
+        await run(
+          "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+        );
+        return {
+          success: false,
+          status: "failed",
+          error: errorMsg,
+          waMeUrl,
+          content,
+          recipientPhone: digits
+        };
+      }
+    } catch (err) {
+      const errorMsg = err?.message || "Network exception sending Twilio WhatsApp message";
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+      );
+      return {
+        success: false,
+        status: "failed",
+        error: errorMsg,
+        waMeUrl,
+        content,
+        recipientPhone: digits
+      };
+    }
+  }
+  if (!settings.access_token || !settings.phone_number_id) {
+    await run(
+      "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [digits, recipientName, messageType, content, "simulated", "meta", referenceId ?? null]
+    );
+    return {
+      success: true,
+      status: "simulated",
+      waMeUrl,
+      content,
+      recipientPhone: digits
+    };
+  }
+  try {
+    const url = `https://graph.facebook.com/v20.0/${settings.phone_number_id}/messages`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${settings.access_token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: digits,
+        type: "text",
+        text: { preview_url: false, body: content }
+      })
+    });
+    const data = await response.json();
+    if (response.ok && data.messages?.[0]?.id) {
+      const messageId = data.messages[0].id;
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, external_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "sent", "meta", messageId, referenceId ?? null]
+      );
+      return {
+        success: true,
+        status: "sent",
+        messageId,
+        waMeUrl,
+        content,
+        recipientPhone: digits
+      };
+    } else {
+      const errorMsg = data?.error?.message || `HTTP ${response.status}: Failed to send WhatsApp message`;
+      await run(
+        "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "failed", "meta", errorMsg, referenceId ?? null]
+      );
+      return {
+        success: false,
+        status: "failed",
+        error: errorMsg,
+        waMeUrl,
+        content,
+        recipientPhone: digits
+      };
+    }
+  } catch (err) {
+    const errorMsg = err?.message || "Network exception sending WhatsApp message";
+    await run(
+      "INSERT INTO whatsapp_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [digits, recipientName, messageType, content, "failed", "meta", errorMsg, referenceId ?? null]
+    );
+    return {
+      success: false,
+      status: "failed",
+      error: errorMsg,
+      waMeUrl,
+      content,
+      recipientPhone: digits
+    };
+  }
+}
+__name(sendWhatsAppMessage, "sendWhatsAppMessage");
+async function sendAppointmentNotification(appointmentId, type) {
+  const apt = await get(
+    `SELECT a.*, c.name as client_name, c.phone as client_phone, s.name as staff_name
+     FROM appointments a
+     LEFT JOIN clients c ON a.client_id = c.id
+     LEFT JOIN staff s ON a.staff_id = s.id
+     WHERE a.id = ?`,
+    [appointmentId]
+  );
+  if (!apt || !apt.client_phone) return null;
+  const services = await query(
+    `SELECT s.name, aps.price
+     FROM appointment_services aps
+     JOIN services s ON aps.service_id = s.id
+     WHERE aps.appointment_id = ?`,
+    [appointmentId]
+  );
+  const serviceNames = services && services.length > 0 ? services.map((s) => s.name).join(", ") : "Salon Service";
+  const settings = await getWhatsAppSettings();
+  let template = "";
+  if (type === "booking_confirmation") template = settings.template_booking_confirmation;
+  else if (type === "reminder") template = settings.template_reminder;
+  else if (type === "reschedule") template = settings.template_reschedule;
+  else if (type === "cancellation") template = settings.template_cancellation;
+  const content = interpolateTemplate(template, {
+    client_name: apt.client_name || "Valued Customer",
+    salon_name: settings.salon_name || "OpenSalon",
+    service_name: serviceNames,
+    date: apt.scheduled_date,
+    time: apt.start_time,
+    staff_name: apt.staff_name || "Any Stylist",
+    total: Number(apt.total_price || 0).toFixed(2),
+    identifier: apt.identifier
+  });
+  return sendWhatsAppMessage({
+    recipientPhone: apt.client_phone,
+    recipientName: apt.client_name,
+    messageType: type,
+    content,
+    referenceId: appointmentId
+  });
+}
+__name(sendAppointmentNotification, "sendAppointmentNotification");
+async function sendInvoiceReceiptNotification(invoiceId) {
+  const inv = await get(
+    `SELECT i.*, c.name as client_name, c.phone as client_phone
+     FROM invoices i
+     LEFT JOIN clients c ON i.client_id = c.id
+     WHERE i.id = ?`,
+    [invoiceId]
+  );
+  if (!inv || !inv.client_phone) return null;
+  const settings = await getWhatsAppSettings();
+  const content = interpolateTemplate(settings.template_receipt, {
+    client_name: inv.client_name || "Valued Customer",
+    salon_name: settings.salon_name || "OpenSalon",
+    invoice_id: inv.identifier || String(invoiceId),
+    total: Number(inv.total || 0).toFixed(2),
+    payment_method: (inv.payment_method || "cash").toUpperCase()
+  });
+  return sendWhatsAppMessage({
+    recipientPhone: inv.client_phone,
+    recipientName: inv.client_name,
+    messageType: "receipt",
+    content,
+    referenceId: invoiceId
+  });
+}
+__name(sendInvoiceReceiptNotification, "sendInvoiceReceiptNotification");
+
+// src/server/sms-helpers.ts
+function cleanPhone2(raw2) {
+  if (!raw2) return "";
+  let digits = raw2.replace(/\D/g, "");
+  digits = digits.replace(/^0+/, "");
+  return digits;
+}
+__name(cleanPhone2, "cleanPhone");
+function formatToE164(raw2, defaultCountryCode = "91") {
+  const digits = cleanPhone2(raw2);
+  if (!digits) return "";
+  if (digits.length === 10) {
+    return `+${defaultCountryCode}${digits}`;
+  }
+  if (!raw2.trim().startsWith("+")) {
+    return `+${digits}`;
+  }
+  return `+${digits}`;
+}
+__name(formatToE164, "formatToE164");
+function formatTo10Digits(raw2) {
+  let digits = cleanPhone2(raw2);
+  if (digits.length === 12 && digits.startsWith("91")) {
+    digits = digits.substring(2);
+  }
+  return digits;
+}
+__name(formatTo10Digits, "formatTo10Digits");
+function interpolateTemplate2(template, variables) {
+  if (!template) return "";
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match2, key) => {
+    const val = variables[key];
+    if (val === void 0 || val === null) {
+      return "";
+    }
+    return String(val);
+  });
+}
+__name(interpolateTemplate2, "interpolateTemplate");
+var GSM_7_REGEX = /^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,\-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\]|€]*$/;
+function calculateSmsSegments(text) {
+  const chars = text ? text.length : 0;
+  if (chars === 0) {
+    return { chars: 0, segments: 1, isUnicode: false, maxPerSegment: 160 };
+  }
+  const isUnicode = !GSM_7_REGEX.test(text);
+  if (!isUnicode) {
+    if (chars <= 160) {
+      return { chars, segments: 1, isUnicode: false, maxPerSegment: 160 };
+    }
+    const segments = Math.ceil(chars / 153);
+    return { chars, segments, isUnicode: false, maxPerSegment: 153 };
+  } else {
+    if (chars <= 70) {
+      return { chars, segments: 1, isUnicode: true, maxPerSegment: 70 };
+    }
+    const segments = Math.ceil(chars / 67);
+    return { chars, segments, isUnicode: true, maxPerSegment: 67 };
+  }
+}
+__name(calculateSmsSegments, "calculateSmsSegments");
+
+// src/server/sms.ts
+async function getSmsSettings() {
+  const row = await get("SELECT * FROM sms_settings WHERE id = 1");
+  if (row) return row;
+  await run("INSERT OR IGNORE INTO sms_settings (id, provider) VALUES (1, 'simulation')");
+  const fallback = await get("SELECT * FROM sms_settings WHERE id = 1");
+  if (fallback) return fallback;
+  return {
+    id: 1,
+    provider: "simulation",
+    twilio_account_sid: "",
+    twilio_auth_token: "",
+    twilio_phone_number: "",
+    fast2sms_api_key: "",
+    fast2sms_route: "q",
+    sender_id: "SALON",
+    salon_name: "OpenSalon",
+    auto_send_booking_confirmation: 1,
+    auto_send_reschedule: 1,
+    auto_send_cancellation: 1,
+    auto_send_receipt: 1,
+    template_booking_confirmation: "Hi {{client_name}}, your booking at {{salon_name}} for {{service_name}} on {{date}} at {{time}} is confirmed! Total: ${{total}}.",
+    template_reminder: "Reminder from {{salon_name}}: You have an appointment for {{service_name}} on {{date}} at {{time}} with {{staff_name}}.",
+    template_reschedule: "Hi {{client_name}}, your appointment at {{salon_name}} has been rescheduled to {{date}} at {{time}} with {{staff_name}}.",
+    template_cancellation: "Hi {{client_name}}, your appointment at {{salon_name}} for {{date}} at {{time}} has been cancelled.",
+    template_receipt: "Thank you for visiting {{salon_name}}, {{client_name}}! Receipt for Invoice #{{invoice_id}}: Paid ${{total}} via {{payment_method}}.",
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+__name(getSmsSettings, "getSmsSettings");
+async function updateSmsSettings(data) {
+  const fields = [];
+  const values = [];
+  const allowed = [
+    "provider",
+    "twilio_account_sid",
+    "twilio_auth_token",
+    "twilio_phone_number",
+    "fast2sms_api_key",
+    "fast2sms_route",
+    "sender_id",
+    "salon_name",
+    "auto_send_booking_confirmation",
+    "auto_send_reschedule",
+    "auto_send_cancellation",
+    "auto_send_receipt",
+    "template_booking_confirmation",
+    "template_reminder",
+    "template_reschedule",
+    "template_cancellation",
+    "template_receipt"
+  ];
+  for (const key of allowed) {
+    if (data[key] !== void 0) {
+      fields.push(`${key} = ?`);
+      values.push(data[key]);
+    }
+  }
+  if (fields.length > 0) {
+    fields.push("updated_at = datetime('now')");
+    await run(`UPDATE sms_settings SET ${fields.join(", ")} WHERE id = 1`, values);
+  }
+  return getSmsSettings();
+}
+__name(updateSmsSettings, "updateSmsSettings");
+async function listSmsLogs(page = 1, limit = 20) {
+  const offset = (page - 1) * limit;
+  const countRow = await get("SELECT COUNT(*) as count FROM sms_logs");
+  const total = countRow?.count ?? 0;
+  const rows = await query(
+    "SELECT * FROM sms_logs ORDER BY id DESC LIMIT ? OFFSET ?",
+    [limit, offset]
+  );
+  return { logs: rows ?? [], total, page, limit };
+}
+__name(listSmsLogs, "listSmsLogs");
+async function sendSMSMessage(params) {
+  const { recipientPhone, recipientName = "", messageType, content, referenceId } = params;
+  const settings = await getSmsSettings();
+  const digits = cleanPhone2(recipientPhone);
+  const segments = calculateSmsSegments(content).segments;
+  if (!digits) {
+    return {
+      success: false,
+      status: "failed",
+      error: "Recipient phone number is invalid or empty",
+      content,
+      recipientPhone,
+      segments
+    };
+  }
+  if (settings.provider === "simulation") {
+    await run(
+      "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [digits, recipientName, messageType, content, "simulated", "simulation", referenceId ?? null]
+    );
+    return {
+      success: true,
+      status: "simulated",
+      content,
+      recipientPhone: digits,
+      segments
+    };
+  }
+  if (settings.provider === "twilio") {
+    if (!settings.twilio_account_sid || !settings.twilio_auth_token) {
+      await run(
+        "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "simulated", "twilio", referenceId ?? null, "Twilio credentials not configured; simulated."]
+      );
+      return {
+        success: true,
+        status: "simulated",
+        content,
+        recipientPhone: digits,
+        segments
+      };
+    }
+    try {
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/Messages.json`;
+      const fromNumber = (settings.twilio_phone_number || "").trim();
+      const toNumber = formatToE164(digits);
+      const basicAuth = btoa(`${settings.twilio_account_sid}:${settings.twilio_auth_token}`);
+      const formParams = new URLSearchParams();
+      formParams.append("From", fromNumber);
+      formParams.append("To", toNumber);
+      formParams.append("Body", content);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: formParams.toString()
+      });
+      const data = await response.json();
+      if (response.ok && data.sid) {
+        await run(
+          "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, external_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "sent", "twilio", data.sid, referenceId ?? null]
+        );
+        return {
+          success: true,
+          status: "sent",
+          messageId: data.sid,
+          content,
+          recipientPhone: digits,
+          segments
+        };
+      } else {
+        const errorMsg = data?.message || `Twilio error ${data?.code || response.status}`;
+        await run(
+          "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+        );
+        return {
+          success: false,
+          status: "failed",
+          error: errorMsg,
+          content,
+          recipientPhone: digits,
+          segments
+        };
+      }
+    } catch (err) {
+      const errorMsg = err?.message || "Network exception sending Twilio SMS";
+      await run(
+        "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "failed", "twilio", errorMsg, referenceId ?? null]
+      );
+      return {
+        success: false,
+        status: "failed",
+        error: errorMsg,
+        content,
+        recipientPhone: digits,
+        segments
+      };
+    }
+  }
+  if (settings.provider === "fast2sms") {
+    if (!settings.fast2sms_api_key) {
+      await run(
+        "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, reference_id, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "simulated", "fast2sms", referenceId ?? null, "Fast2SMS API key not configured; simulated."]
+      );
+      return {
+        success: true,
+        status: "simulated",
+        content,
+        recipientPhone: digits,
+        segments
+      };
+    }
+    try {
+      const tenDigitPhone = formatTo10Digits(digits);
+      const url = "https://www.fast2sms.com/dev/bulkV2";
+      const payload = {
+        route: settings.fast2sms_route || "q",
+        message: content,
+        language: "english",
+        flash: 0,
+        numbers: tenDigitPhone
+      };
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "authorization": settings.fast2sms_api_key.trim(),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (response.ok && data.return === true) {
+        const requestId = data.request_id || "fast2sms-" + Date.now();
+        await run(
+          "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, external_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "sent", "fast2sms", requestId, referenceId ?? null]
+        );
+        return {
+          success: true,
+          status: "sent",
+          messageId: requestId,
+          content,
+          recipientPhone: digits,
+          segments
+        };
+      } else {
+        const errorMsg = Array.isArray(data?.message) ? data.message.join(", ") : data?.message || `Fast2SMS HTTP ${response.status}`;
+        await run(
+          "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [digits, recipientName, messageType, content, "failed", "fast2sms", errorMsg, referenceId ?? null]
+        );
+        return {
+          success: false,
+          status: "failed",
+          error: errorMsg,
+          content,
+          recipientPhone: digits,
+          segments
+        };
+      }
+    } catch (err) {
+      const errorMsg = err?.message || "Network exception sending Fast2SMS message";
+      await run(
+        "INSERT INTO sms_logs (recipient_phone, recipient_name, message_type, content, status, provider, error_message, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [digits, recipientName, messageType, content, "failed", "fast2sms", errorMsg, referenceId ?? null]
+      );
+      return {
+        success: false,
+        status: "failed",
+        error: errorMsg,
+        content,
+        recipientPhone: digits,
+        segments
+      };
+    }
+  }
+  return {
+    success: false,
+    status: "failed",
+    error: `Unknown SMS provider: ${settings.provider}`,
+    content,
+    recipientPhone: digits,
+    segments
+  };
+}
+__name(sendSMSMessage, "sendSMSMessage");
+async function sendAppointmentSMSNotification(appointmentId, type) {
+  const apt = await get(
+    `SELECT a.*, c.name as client_name, c.phone as client_phone, s.name as staff_name
+     FROM appointments a
+     LEFT JOIN clients c ON a.client_id = c.id
+     LEFT JOIN staff s ON a.staff_id = s.id
+     WHERE a.id = ?`,
+    [appointmentId]
+  );
+  if (!apt || !apt.client_phone) return null;
+  const services = await query(
+    `SELECT s.name, aps.price
+     FROM appointment_services aps
+     JOIN services s ON aps.service_id = s.id
+     WHERE aps.appointment_id = ?`,
+    [appointmentId]
+  );
+  const serviceNames = services && services.length > 0 ? services.map((s) => s.name).join(", ") : "Salon Service";
+  const settings = await getSmsSettings();
+  let template = "";
+  if (type === "booking_confirmation") template = settings.template_booking_confirmation;
+  else if (type === "reminder") template = settings.template_reminder;
+  else if (type === "reschedule") template = settings.template_reschedule;
+  else if (type === "cancellation") template = settings.template_cancellation;
+  const content = interpolateTemplate2(template, {
+    client_name: apt.client_name || "Valued Customer",
+    salon_name: settings.salon_name || "OpenSalon",
+    service_name: serviceNames,
+    date: apt.scheduled_date,
+    time: apt.start_time,
+    staff_name: apt.staff_name || "Any Stylist",
+    total: Number(apt.total_price || 0).toFixed(2),
+    identifier: apt.identifier
+  });
+  return sendSMSMessage({
+    recipientPhone: apt.client_phone,
+    recipientName: apt.client_name,
+    messageType: type,
+    content,
+    referenceId: appointmentId
+  });
+}
+__name(sendAppointmentSMSNotification, "sendAppointmentSMSNotification");
+async function sendInvoiceReceiptSMSNotification(invoiceId) {
+  const inv = await get(
+    `SELECT i.*, c.name as client_name, c.phone as client_phone
+     FROM invoices i
+     LEFT JOIN clients c ON i.client_id = c.id
+     WHERE i.id = ?`,
+    [invoiceId]
+  );
+  if (!inv || !inv.client_phone) return null;
+  const settings = await getSmsSettings();
+  const content = interpolateTemplate2(settings.template_receipt, {
+    client_name: inv.client_name || "Valued Customer",
+    salon_name: settings.salon_name || "OpenSalon",
+    invoice_id: inv.identifier || String(invoiceId),
+    total: Number(inv.total || 0).toFixed(2),
+    payment_method: (inv.payment_method || "cash").toUpperCase()
+  });
+  return sendSMSMessage({
+    recipientPhone: inv.client_phone,
+    recipientName: inv.client_name,
+    messageType: "receipt",
+    content,
+    referenceId: invoiceId
+  });
+}
+__name(sendInvoiceReceiptSMSNotification, "sendInvoiceReceiptSMSNotification");
 
 // src/server/index.ts
 var app = createApp({
@@ -9913,13 +10694,17 @@ app.use("/api/*", async (c, next) => {
   if (c.req.path.startsWith("/api/auth/") || c.req.path.startsWith("/api/public/")) return next();
   const authHeader = c.req.header("Authorization");
   const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-  if (!token) return c.json({ error: "Unauthorized" }, 401);
+  if (!token) {
+    console.error(`[AUTH 401] No token provided for ${c.req.method} ${c.req.path}. Header was: ${authHeader}`);
+    return c.json({ error: "Unauthorized" }, 401);
+  }
   try {
     const decoded = await verify2(token, JWT_SECRET, "HS256");
     c.set("user", decoded);
     return next();
-  } catch {
-    return c.json({ error: "Unauthorized" }, 401);
+  } catch (err) {
+    console.error(`[AUTH 401] Token verification failed for ${c.req.method} ${c.req.path}: ${err?.message || err}`);
+    return c.json({ error: "Unauthorized", message: err?.message }, 401);
   }
 });
 var ErrorSchema = external_exports.object({ error: external_exports.string() }).openapi("Error");
@@ -9968,10 +10753,21 @@ var InvoiceSchema = external_exports.object({
   tax: external_exports.number(),
   total: external_exports.number(),
   payment_method: external_exports.string(),
+  split_cash: external_exports.number().optional().nullable(),
+  split_upi: external_exports.number().optional().nullable(),
+  split_card: external_exports.number().optional().nullable(),
+  coupon_code: external_exports.string().optional().nullable(),
+  coupon_discount: external_exports.number().optional().nullable(),
+  loyalty_points_redeemed: external_exports.number().int().optional().nullable(),
+  loyalty_discount: external_exports.number().optional().nullable(),
+  membership_discount: external_exports.number().optional().nullable(),
+  membership_services_deducted: external_exports.number().int().optional().nullable(),
   status: external_exports.string(),
   created_at: external_exports.string(),
   updated_at: external_exports.string(),
-  items: external_exports.array(InvoiceItemSchema).optional()
+  items: external_exports.array(InvoiceItemSchema).optional(),
+  client_name: external_exports.string().optional().nullable(),
+  client_phone: external_exports.string().optional().nullable()
 }).openapi("Invoice");
 var ClientSchema = external_exports.object({
   id: external_exports.number().int(),
@@ -9980,6 +10776,10 @@ var ClientSchema = external_exports.object({
   phone: external_exports.string(),
   notes: external_exports.string(),
   appointment_count: external_exports.number().int().optional(),
+  loyalty_points: external_exports.number().int().optional().nullable(),
+  total_spent: external_exports.number().optional().nullable(),
+  total_visits: external_exports.number().int().optional().nullable(),
+  last_visit_date: external_exports.string().optional().nullable(),
   created_at: external_exports.string(),
   updated_at: external_exports.string()
 }).openapi("Client");
@@ -9990,10 +10790,117 @@ var StaffSchema = external_exports.object({
   phone: external_exports.string(),
   title: external_exports.string(),
   color: external_exports.string(),
+  base_salary: external_exports.number().optional().nullable(),
+  commission_percent: external_exports.number().optional().nullable(),
   active: external_exports.number().int(),
   appointment_count: external_exports.number().int().optional(),
   created_at: external_exports.string()
 }).openapi("Staff");
+var MembershipSchema = external_exports.object({
+  id: external_exports.number().int(),
+  name: external_exports.string(),
+  description: external_exports.string().optional().nullable(),
+  price: external_exports.number(),
+  duration_days: external_exports.number().int(),
+  service_discount_percent: external_exports.number(),
+  product_discount_percent: external_exports.number(),
+  included_services_count: external_exports.number().int(),
+  bonus_loyalty_points: external_exports.number().int(),
+  active: external_exports.number().int(),
+  created_at: external_exports.string().optional()
+}).openapi("Membership");
+var ClientMembershipSchema = external_exports.object({
+  id: external_exports.number().int(),
+  client_id: external_exports.number().int(),
+  membership_id: external_exports.number().int(),
+  membership_name: external_exports.string().optional().nullable(),
+  client_name: external_exports.string().optional().nullable(),
+  client_phone: external_exports.string().optional().nullable(),
+  start_date: external_exports.string(),
+  end_date: external_exports.string(),
+  services_total: external_exports.number().int(),
+  services_used: external_exports.number().int(),
+  status: external_exports.string(),
+  service_discount_percent: external_exports.number().optional().nullable(),
+  product_discount_percent: external_exports.number().optional().nullable(),
+  created_at: external_exports.string().optional()
+}).openapi("ClientMembership");
+var LoyaltyTransactionSchema = external_exports.object({
+  id: external_exports.number().int(),
+  client_id: external_exports.number().int(),
+  client_name: external_exports.string().optional().nullable(),
+  points: external_exports.number().int(),
+  transaction_type: external_exports.string(),
+  reference_id: external_exports.number().int().optional().nullable(),
+  notes: external_exports.string().optional().nullable(),
+  created_at: external_exports.string().optional()
+}).openapi("LoyaltyTransaction");
+var CouponSchema = external_exports.object({
+  id: external_exports.number().int(),
+  code: external_exports.string(),
+  description: external_exports.string().optional().nullable(),
+  discount_type: external_exports.string(),
+  discount_value: external_exports.number(),
+  min_order_amount: external_exports.number().optional().default(0),
+  valid_until: external_exports.string().optional().nullable(),
+  is_active: external_exports.number().int().optional().default(1),
+  usage_limit: external_exports.number().int().optional().nullable(),
+  times_used: external_exports.number().int().optional().default(0),
+  created_at: external_exports.string().optional()
+}).openapi("Coupon");
+var StaffCommissionSchema = external_exports.object({
+  id: external_exports.number().int(),
+  staff_id: external_exports.number().int(),
+  staff_name: external_exports.string().optional().nullable(),
+  invoice_id: external_exports.number().int(),
+  item_name: external_exports.string(),
+  item_type: external_exports.string(),
+  item_price: external_exports.number(),
+  commission_percent: external_exports.number(),
+  commission_amount: external_exports.number(),
+  created_at: external_exports.string().optional()
+}).openapi("StaffCommission");
+var InactiveClientAlertSchema = external_exports.object({
+  id: external_exports.number().int(),
+  name: external_exports.string(),
+  phone: external_exports.string(),
+  days_since_last_visit: external_exports.number().int(),
+  last_visit_date: external_exports.string(),
+  total_spent: external_exports.number(),
+  total_visits: external_exports.number().int(),
+  suggested_discount: external_exports.string(),
+  suggested_message: external_exports.string(),
+  whatsapp_url: external_exports.string()
+}).openapi("InactiveClientAlert");
+var SlowHourOpportunitySchema = external_exports.object({
+  day_name: external_exports.string(),
+  slot_label: external_exports.string(),
+  historical_bookings: external_exports.number().int(),
+  recommended_deal: external_exports.string(),
+  promo_code: external_exports.string(),
+  estimated_lift: external_exports.string()
+}).openapi("SlowHourOpportunity");
+var StylistLeaderboardSchema = external_exports.object({
+  staff_id: external_exports.number().int(),
+  staff_name: external_exports.string(),
+  staff_title: external_exports.string(),
+  staff_color: external_exports.string(),
+  completed_appointments: external_exports.number().int(),
+  service_revenue: external_exports.number(),
+  product_revenue: external_exports.number(),
+  total_sales: external_exports.number(),
+  commission_earned: external_exports.number(),
+  rank: external_exports.number().int()
+}).openapi("StylistLeaderboard");
+var GrowthInsightsSchema = external_exports.object({
+  inactive_clients: external_exports.array(InactiveClientAlertSchema),
+  slow_hours: external_exports.array(SlowHourOpportunitySchema),
+  stylist_leaderboard: external_exports.array(StylistLeaderboardSchema),
+  total_members: external_exports.number().int(),
+  loyalty_points_in_circulation: external_exports.number().int(),
+  repeat_client_rate: external_exports.number(),
+  avg_ticket_size: external_exports.number()
+}).openapi("GrowthInsights");
 var ServiceSchema = external_exports.object({
   id: external_exports.number().int(),
   name: external_exports.string(),
@@ -10066,6 +10973,134 @@ var ProductSchema = external_exports.object({
   created_at: external_exports.string(),
   updated_at: external_exports.string()
 }).openapi("Product");
+var WhatsAppSettingsSchema = external_exports.object({
+  id: external_exports.number().int(),
+  provider: external_exports.enum(["meta", "twilio", "simulation"]),
+  phone_number_id: external_exports.string().optional().default(""),
+  access_token: external_exports.string().optional().default(""),
+  business_account_id: external_exports.string().optional().default(""),
+  sender_phone_number: external_exports.string().optional().default(""),
+  twilio_account_sid: external_exports.string().optional().default(""),
+  twilio_auth_token: external_exports.string().optional().default(""),
+  twilio_phone_number: external_exports.string().optional().default("+14155238886"),
+  twilio_content_sid: external_exports.string().optional().default(""),
+  salon_name: external_exports.string(),
+  auto_send_booking_confirmation: external_exports.number().int(),
+  auto_send_reschedule: external_exports.number().int(),
+  auto_send_cancellation: external_exports.number().int(),
+  auto_send_receipt: external_exports.number().int(),
+  template_booking_confirmation: external_exports.string(),
+  template_reminder: external_exports.string(),
+  template_reschedule: external_exports.string(),
+  template_cancellation: external_exports.string(),
+  template_receipt: external_exports.string(),
+  updated_at: external_exports.string().optional()
+}).openapi("WhatsAppSettings");
+var UpdateWhatsAppSettingsSchema = external_exports.object({
+  provider: external_exports.enum(["meta", "twilio", "simulation"]).optional(),
+  phone_number_id: external_exports.string().optional(),
+  access_token: external_exports.string().optional(),
+  business_account_id: external_exports.string().optional(),
+  sender_phone_number: external_exports.string().optional(),
+  twilio_account_sid: external_exports.string().optional(),
+  twilio_auth_token: external_exports.string().optional(),
+  twilio_phone_number: external_exports.string().optional(),
+  twilio_content_sid: external_exports.string().optional(),
+  salon_name: external_exports.string().optional(),
+  auto_send_booking_confirmation: external_exports.number().int().optional(),
+  auto_send_reschedule: external_exports.number().int().optional(),
+  auto_send_cancellation: external_exports.number().int().optional(),
+  auto_send_receipt: external_exports.number().int().optional(),
+  template_booking_confirmation: external_exports.string().optional(),
+  template_reminder: external_exports.string().optional(),
+  template_reschedule: external_exports.string().optional(),
+  template_cancellation: external_exports.string().optional(),
+  template_receipt: external_exports.string().optional()
+}).openapi("UpdateWhatsAppSettings");
+var WhatsAppLogSchema = external_exports.object({
+  id: external_exports.number().int(),
+  recipient_phone: external_exports.string(),
+  recipient_name: external_exports.string(),
+  message_type: external_exports.string(),
+  content: external_exports.string(),
+  status: external_exports.enum(["sent", "delivered", "failed", "simulated"]),
+  provider: external_exports.string(),
+  external_id: external_exports.string(),
+  error_message: external_exports.string(),
+  reference_id: external_exports.number().int().nullable(),
+  created_at: external_exports.string()
+}).openapi("WhatsAppLog");
+var WhatsAppSendResultSchema = external_exports.object({
+  success: external_exports.boolean(),
+  status: external_exports.enum(["sent", "simulated", "failed"]),
+  messageId: external_exports.string().optional(),
+  error: external_exports.string().optional(),
+  waMeUrl: external_exports.string(),
+  content: external_exports.string(),
+  recipientPhone: external_exports.string()
+}).openapi("WhatsAppSendResult");
+var SmsSettingsSchema = external_exports.object({
+  id: external_exports.number().int(),
+  provider: external_exports.enum(["simulation", "twilio", "fast2sms"]),
+  twilio_account_sid: external_exports.string().optional().default(""),
+  twilio_auth_token: external_exports.string().optional().default(""),
+  twilio_phone_number: external_exports.string().optional().default(""),
+  fast2sms_api_key: external_exports.string().optional().default(""),
+  fast2sms_route: external_exports.string().optional().default("q"),
+  sender_id: external_exports.string().optional().default("SALON"),
+  salon_name: external_exports.string(),
+  auto_send_booking_confirmation: external_exports.number().int(),
+  auto_send_reschedule: external_exports.number().int(),
+  auto_send_cancellation: external_exports.number().int(),
+  auto_send_receipt: external_exports.number().int(),
+  template_booking_confirmation: external_exports.string(),
+  template_reminder: external_exports.string(),
+  template_reschedule: external_exports.string(),
+  template_cancellation: external_exports.string(),
+  template_receipt: external_exports.string(),
+  updated_at: external_exports.string().optional()
+}).openapi("SmsSettings");
+var UpdateSmsSettingsSchema = external_exports.object({
+  provider: external_exports.enum(["simulation", "twilio", "fast2sms"]).optional(),
+  twilio_account_sid: external_exports.string().optional(),
+  twilio_auth_token: external_exports.string().optional(),
+  twilio_phone_number: external_exports.string().optional(),
+  fast2sms_api_key: external_exports.string().optional(),
+  fast2sms_route: external_exports.string().optional(),
+  sender_id: external_exports.string().optional(),
+  salon_name: external_exports.string().optional(),
+  auto_send_booking_confirmation: external_exports.number().int().optional(),
+  auto_send_reschedule: external_exports.number().int().optional(),
+  auto_send_cancellation: external_exports.number().int().optional(),
+  auto_send_receipt: external_exports.number().int().optional(),
+  template_booking_confirmation: external_exports.string().optional(),
+  template_reminder: external_exports.string().optional(),
+  template_reschedule: external_exports.string().optional(),
+  template_cancellation: external_exports.string().optional(),
+  template_receipt: external_exports.string().optional()
+}).openapi("UpdateSmsSettings");
+var SmsLogSchema = external_exports.object({
+  id: external_exports.number().int(),
+  recipient_phone: external_exports.string(),
+  recipient_name: external_exports.string(),
+  message_type: external_exports.string(),
+  content: external_exports.string(),
+  status: external_exports.enum(["sent", "delivered", "failed", "simulated"]),
+  provider: external_exports.string(),
+  external_id: external_exports.string(),
+  error_message: external_exports.string(),
+  reference_id: external_exports.number().int().nullable(),
+  created_at: external_exports.string()
+}).openapi("SmsLog");
+var SmsSendResultSchema = external_exports.object({
+  success: external_exports.boolean(),
+  status: external_exports.enum(["sent", "simulated", "failed"]),
+  messageId: external_exports.string().optional(),
+  error: external_exports.string().optional(),
+  content: external_exports.string(),
+  recipientPhone: external_exports.string(),
+  segments: external_exports.number().optional()
+}).openapi("SmsSendResult");
 var IdParam = external_exports.object({ id: external_exports.string().openapi({ description: "Resource ID" }) });
 async function hashPassword(password) {
   const msgUint8 = new TextEncoder().encode(password);
@@ -10164,8 +11199,8 @@ app.openapi(login, async (c) => {
     username: user.username,
     role: user.role,
     staff_id: user.staff_id,
-    exp: Math.floor(Date.now() / 1e3) + 60 * 60 * 24
-    // 24 hours
+    exp: Math.floor(Date.now() / 1e3) + 60 * 60 * 24 * 30
+    // 30 days
   };
   const token = await sign2(payload, JWT_SECRET);
   return c.json({ user: payload, token }, 200);
@@ -10283,15 +11318,15 @@ app.openapi(listInvoices, async (c) => {
   const limit = parseInt(c.req.query("limit") || "50", 10);
   const offset = (page - 1) * limit;
   const status = c.req.query("status");
-  let q = "SELECT * FROM invoices";
+  let q = "SELECT i.*, c.name as client_name, c.phone as client_phone FROM invoices i LEFT JOIN clients c ON i.client_id = c.id";
   let countQ = "SELECT COUNT(*) as total FROM invoices";
   const params = [];
   if (status) {
-    q += " WHERE status = ?";
+    q += " WHERE i.status = ?";
     countQ += " WHERE status = ?";
     params.push(status);
   }
-  q += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+  q += " ORDER BY i.created_at DESC LIMIT ? OFFSET ?";
   const [invoices, total] = await Promise.all([
     query(q, [...params, String(limit), String(offset)]),
     get(countQ, params)
@@ -10309,7 +11344,7 @@ var getInvoice = createRoute({
 });
 app.openapi(getInvoice, async (c) => {
   const id = c.req.valid("param").id;
-  const invoice = await get("SELECT * FROM invoices WHERE id = ?", [id]);
+  const invoice = await get("SELECT i.*, c.name as client_name, c.phone as client_phone FROM invoices i LEFT JOIN clients c ON i.client_id = c.id WHERE i.id = ?", [id]);
   if (!invoice) return c.json({ error: "Invoice not found" }, 404);
   const items = await query("SELECT * FROM invoice_items WHERE invoice_id = ?", [id]);
   return c.json({ invoice: { ...invoice, items } }, 200);
@@ -10334,8 +11369,11 @@ app.openapi(createInvoice, async (c) => {
   const data = c.req.valid("json");
   const identifier = await nextInvoiceIdentifier();
   const result = await run(
-    `INSERT INTO invoices (identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO invoices (
+      identifier, appointment_id, client_id, subtotal, discount, tax, total, payment_method,
+      split_cash, split_upi, split_card, coupon_code, coupon_discount,
+      loyalty_points_redeemed, loyalty_discount, membership_discount, membership_services_deducted, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       identifier,
       data.appointment_id ? String(data.appointment_id) : null,
@@ -10345,6 +11383,15 @@ app.openapi(createInvoice, async (c) => {
       String(data.tax),
       String(data.total),
       data.payment_method,
+      String(data.split_cash || 0),
+      String(data.split_upi || 0),
+      String(data.split_card || 0),
+      data.coupon_code || "",
+      String(data.coupon_discount || 0),
+      String(data.loyalty_points_redeemed || 0),
+      String(data.loyalty_discount || 0),
+      String(data.membership_discount || 0),
+      String(data.membership_services_deducted || 0),
       data.status
     ]
   );
@@ -10365,8 +11412,94 @@ app.openapi(createInvoice, async (c) => {
       itemParams
     );
   }
-  const newInvoice = await get("SELECT * FROM invoices WHERE id = ?", [String(invoiceId)]);
+  if (data.coupon_code) {
+    await run("UPDATE coupons SET times_used = times_used + 1 WHERE code = ?", [data.coupon_code]);
+  }
+  const loyaltyRedeemed = data.loyalty_points_redeemed || 0;
+  const loyaltyEarned = data.status === "paid" ? Math.floor(data.total / 10) : 0;
+  if (loyaltyRedeemed > 0) {
+    await run(
+      "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'redeemed_pos', ?, ?)",
+      [String(data.client_id), String(-loyaltyRedeemed), String(invoiceId), `Redeemed on Invoice #${identifier}`]
+    );
+  }
+  if (loyaltyEarned > 0) {
+    await run(
+      "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'earned_invoice', ?, ?)",
+      [String(data.client_id), String(loyaltyEarned), String(invoiceId), `Earned from Invoice #${identifier}`]
+    );
+  }
+  if (data.status === "paid") {
+    await run(
+      `UPDATE clients SET 
+         loyalty_points = MAX(0, COALESCE(loyalty_points, 0) - ? + ?),
+         total_spent = COALESCE(total_spent, 0) + ?,
+         total_visits = COALESCE(total_visits, 0) + 1,
+         last_visit_date = date('now'),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+      [String(loyaltyRedeemed), String(loyaltyEarned), String(data.total), String(data.client_id)]
+    );
+  } else if (loyaltyRedeemed > 0) {
+    await run(
+      "UPDATE clients SET loyalty_points = MAX(0, COALESCE(loyalty_points, 0) - ?), updated_at = datetime('now') WHERE id = ?",
+      [String(loyaltyRedeemed), String(data.client_id)]
+    );
+  }
+  let staffId = null;
+  if (data.appointment_id) {
+    const apt = await get("SELECT staff_id FROM appointments WHERE id = ?", [String(data.appointment_id)]);
+    staffId = apt?.staff_id || null;
+  }
+  if (!staffId) {
+    const defaultStaff = await get("SELECT id FROM staff WHERE active = 1 ORDER BY id ASC LIMIT 1");
+    staffId = defaultStaff?.id || null;
+  }
+  if (staffId && data.items && data.items.length > 0) {
+    const staffRow = await get("SELECT id, commission_percent FROM staff WHERE id = ?", [String(staffId)]);
+    if (staffRow) {
+      const commRate = staffRow.commission_percent ?? 10;
+      for (const item of data.items) {
+        const commEarned = Math.round(item.total * commRate / 100 * 100) / 100;
+        await run(
+          `INSERT INTO staff_commissions (staff_id, invoice_id, item_name, item_type, item_price, commission_percent, commission_amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [String(staffId), String(invoiceId), item.name, item.item_type, String(item.total), String(commRate), String(commEarned)]
+        );
+      }
+    }
+  }
+  const activePlan = await get(
+    "SELECT id, services_total, services_used FROM client_memberships WHERE client_id = ? AND status = 'active' AND end_date >= date('now') ORDER BY end_date ASC LIMIT 1",
+    [String(data.client_id)]
+  );
+  if (activePlan) {
+    const servicesToDeduct = data.membership_services_deducted !== void 0 ? data.membership_services_deducted : 0;
+    if (servicesToDeduct > 0) {
+      await run(
+        "UPDATE client_memberships SET services_used = MIN(services_total, services_used + ?) WHERE id = ?",
+        [String(servicesToDeduct), String(activePlan.id)]
+      );
+    }
+  }
+  const newInvoice = await get("SELECT i.*, c.name as client_name, c.phone as client_phone FROM invoices i LEFT JOIN clients c ON i.client_id = c.id WHERE i.id = ?", [String(invoiceId)]);
   const newItems = await query("SELECT * FROM invoice_items WHERE invoice_id = ?", [String(invoiceId)]);
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (data.status === "paid" && waSettings.auto_send_receipt) {
+      await sendInvoiceReceiptNotification(Number(invoiceId));
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp receipt error:", err);
+  }
+  try {
+    const smsSettings = await getSmsSettings();
+    if (data.status === "paid" && smsSettings.auto_send_receipt) {
+      await sendInvoiceReceiptSMSNotification(Number(invoiceId));
+    }
+  } catch (err) {
+    console.error("Auto SMS receipt error:", err);
+  }
   return c.json({ invoice: { ...newInvoice, items: newItems } }, 200);
 });
 var updateInvoiceStatus = createRoute({
@@ -10383,10 +11516,39 @@ var updateInvoiceStatus = createRoute({
 app.openapi(updateInvoiceStatus, async (c) => {
   const id = c.req.valid("param").id;
   const { status, payment_method } = c.req.valid("json");
+  const existing = await get("SELECT * FROM invoices WHERE id = ?", [id]);
+  if (!existing) return c.json({ ok: false }, 404);
   if (payment_method) {
     await run("UPDATE invoices SET status = ?, payment_method = ?, updated_at = datetime('now') WHERE id = ?", [status, payment_method, id]);
   } else {
     await run("UPDATE invoices SET status = ?, updated_at = datetime('now') WHERE id = ?", [status, id]);
+  }
+  if (existing.status !== "paid" && status === "paid") {
+    const loyaltyEarned = Math.floor(existing.total / 10);
+    if (loyaltyEarned > 0) {
+      await run(
+        "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'earned_invoice', ?, ?)",
+        [String(existing.client_id), String(loyaltyEarned), String(id), `Earned from Invoice #${existing.identifier}`]
+      );
+    }
+    await run(
+      `UPDATE clients SET 
+         loyalty_points = COALESCE(loyalty_points, 0) + ?,
+         total_spent = COALESCE(total_spent, 0) + ?,
+         total_visits = COALESCE(total_visits, 0) + 1,
+         last_visit_date = date('now'),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+      [String(loyaltyEarned), String(existing.total), String(existing.client_id)]
+    );
+  }
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (status === "paid" && waSettings.auto_send_receipt) {
+      await sendInvoiceReceiptNotification(Number(id));
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp receipt error on status update:", err);
   }
   return c.json({ ok: true }, 200);
 });
@@ -10668,6 +11830,22 @@ app.openapi(createAppointment, async (c) => {
      WHERE a.id = ?`,
     [aptId]
   );
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (waSettings.auto_send_booking_confirmation) {
+      await sendAppointmentNotification(aptId, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp confirmation error:", err);
+  }
+  try {
+    const smsSettings = await getSmsSettings();
+    if (smsSettings.auto_send_booking_confirmation) {
+      await sendAppointmentSMSNotification(aptId, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto SMS confirmation error:", err);
+  }
   return c.json({ appointment: apt }, 201);
 });
 var updateAppointment = createRoute({
@@ -10737,6 +11915,26 @@ app.openapi(updateAppointment, async (c) => {
   }
   sets.push("updated_at = datetime('now')");
   await run(`UPDATE appointments SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (body.status === "cancelled" && existing.status !== "cancelled" && waSettings.auto_send_cancellation) {
+      await sendAppointmentNotification(Number(id), "cancellation");
+    } else if (moved && status !== "cancelled" && waSettings.auto_send_reschedule) {
+      await sendAppointmentNotification(Number(id), "reschedule");
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp update error:", err);
+  }
+  try {
+    const smsSettings = await getSmsSettings();
+    if (body.status === "cancelled" && existing.status !== "cancelled" && smsSettings.auto_send_cancellation) {
+      await sendAppointmentSMSNotification(Number(id), "cancellation");
+    } else if (moved && status !== "cancelled" && smsSettings.auto_send_reschedule) {
+      await sendAppointmentSMSNotification(Number(id), "reschedule");
+    }
+  } catch (err) {
+    console.error("Auto SMS update error:", err);
+  }
   return c.json({ ok: true }, 200);
 });
 var deleteAppointment = createRoute({
@@ -11396,7 +12594,888 @@ app.openapi(publicBook, async (c) => {
     "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
     [apt.id, body.service_id, service.price, service.duration]
   );
+  try {
+    const waSettings = await getWhatsAppSettings();
+    if (waSettings.auto_send_booking_confirmation) {
+      await sendAppointmentNotification(apt.id, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto WhatsApp public booking confirmation error:", err);
+  }
+  try {
+    const smsSettings = await getSmsSettings();
+    if (smsSettings.auto_send_booking_confirmation) {
+      await sendAppointmentSMSNotification(apt.id, "booking_confirmation");
+    }
+  } catch (err) {
+    console.error("Auto SMS public booking confirmation error:", err);
+  }
   return c.json({ ok: true, appointment_id: apt.id }, 200);
+});
+var getWhatsAppSettingsEndpoint = createRoute({
+  method: "get",
+  path: "/api/whatsapp/settings",
+  responses: {
+    200: {
+      description: "WhatsApp settings",
+      content: { "application/json": { schema: external_exports.object({ settings: WhatsAppSettingsSchema }) } }
+    }
+  }
+});
+app.openapi(getWhatsAppSettingsEndpoint, async (c) => {
+  const settings = await getWhatsAppSettings();
+  return c.json({ settings }, 200);
+});
+var updateWhatsAppSettingsEndpoint = createRoute({
+  method: "put",
+  path: "/api/whatsapp/settings",
+  request: {
+    body: { content: { "application/json": { schema: UpdateWhatsAppSettingsSchema } } }
+  },
+  responses: {
+    200: {
+      description: "Updated WhatsApp settings",
+      content: { "application/json": { schema: external_exports.object({ settings: WhatsAppSettingsSchema }) } }
+    }
+  }
+});
+app.openapi(updateWhatsAppSettingsEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const settings = await updateWhatsAppSettings(body);
+  return c.json({ settings }, 200);
+});
+var getWhatsAppLogsEndpoint = createRoute({
+  method: "get",
+  path: "/api/whatsapp/logs",
+  request: {
+    query: external_exports.object({
+      page: external_exports.string().optional(),
+      limit: external_exports.string().optional()
+    })
+  },
+  responses: {
+    200: {
+      description: "WhatsApp message logs",
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            logs: external_exports.array(WhatsAppLogSchema),
+            total: external_exports.number(),
+            page: external_exports.number(),
+            limit: external_exports.number()
+          })
+        }
+      }
+    }
+  }
+});
+app.openapi(getWhatsAppLogsEndpoint, async (c) => {
+  const { page, limit } = c.req.valid("query");
+  const p = Math.max(1, parseInt(page || "1", 10) || 1);
+  const l = Math.min(100, Math.max(1, parseInt(limit || "20", 10) || 20));
+  const res = await listWhatsAppLogs(p, l);
+  return c.json(res, 200);
+});
+var sendTestWhatsAppEndpoint = createRoute({
+  method: "post",
+  path: "/api/whatsapp/send-test",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            phone: external_exports.string(),
+            message: external_exports.string()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Test message result",
+      content: { "application/json": { schema: external_exports.object({ result: WhatsAppSendResultSchema }) } }
+    }
+  }
+});
+app.openapi(sendTestWhatsAppEndpoint, async (c) => {
+  const { phone, message } = c.req.valid("json");
+  const result = await sendWhatsAppMessage({
+    recipientPhone: phone,
+    recipientName: "Test Recipient",
+    messageType: "test",
+    content: message
+  });
+  return c.json({ result }, 200);
+});
+var sendAppointmentWhatsAppEndpoint = createRoute({
+  method: "post",
+  path: "/api/whatsapp/send-appointment",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            appointment_id: external_exports.number().int(),
+            type: external_exports.enum(["booking_confirmation", "reminder", "reschedule", "cancellation"])
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Appointment message result",
+      content: { "application/json": { schema: external_exports.object({ result: WhatsAppSendResultSchema.nullable() }) } }
+    },
+    404: {
+      description: "Appointment not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } }
+    }
+  }
+});
+app.openapi(sendAppointmentWhatsAppEndpoint, async (c) => {
+  const { appointment_id, type } = c.req.valid("json");
+  const result = await sendAppointmentNotification(appointment_id, type);
+  if (!result) {
+    return c.json({ error: "Appointment not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+var sendReceiptWhatsAppEndpoint = createRoute({
+  method: "post",
+  path: "/api/whatsapp/send-receipt",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            invoice_id: external_exports.number().int()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Receipt message result",
+      content: { "application/json": { schema: external_exports.object({ result: WhatsAppSendResultSchema.nullable() }) } }
+    },
+    404: {
+      description: "Invoice not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } }
+    }
+  }
+});
+app.openapi(sendReceiptWhatsAppEndpoint, async (c) => {
+  const { invoice_id } = c.req.valid("json");
+  const result = await sendInvoiceReceiptNotification(invoice_id);
+  if (!result) {
+    return c.json({ error: "Invoice not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+var getSmsSettingsEndpoint = createRoute({
+  method: "get",
+  path: "/api/sms/settings",
+  responses: {
+    200: {
+      description: "SMS gateway settings",
+      content: { "application/json": { schema: external_exports.object({ settings: SmsSettingsSchema }) } }
+    }
+  }
+});
+app.openapi(getSmsSettingsEndpoint, async (c) => {
+  const settings = await getSmsSettings();
+  return c.json({ settings }, 200);
+});
+var updateSmsSettingsEndpoint = createRoute({
+  method: "put",
+  path: "/api/sms/settings",
+  request: {
+    body: { content: { "application/json": { schema: UpdateSmsSettingsSchema } } }
+  },
+  responses: {
+    200: {
+      description: "Updated SMS settings",
+      content: { "application/json": { schema: external_exports.object({ settings: SmsSettingsSchema }) } }
+    }
+  }
+});
+app.openapi(updateSmsSettingsEndpoint, async (c) => {
+  const body = c.req.valid("json");
+  const settings = await updateSmsSettings(body);
+  return c.json({ settings }, 200);
+});
+var getSmsLogsEndpoint = createRoute({
+  method: "get",
+  path: "/api/sms/logs",
+  request: {
+    query: external_exports.object({
+      page: external_exports.string().optional(),
+      limit: external_exports.string().optional()
+    })
+  },
+  responses: {
+    200: {
+      description: "SMS message logs",
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            logs: external_exports.array(SmsLogSchema),
+            total: external_exports.number(),
+            page: external_exports.number(),
+            limit: external_exports.number()
+          })
+        }
+      }
+    }
+  }
+});
+app.openapi(getSmsLogsEndpoint, async (c) => {
+  const { page, limit } = c.req.valid("query");
+  const p = Math.max(1, parseInt(page || "1", 10) || 1);
+  const l = Math.min(100, Math.max(1, parseInt(limit || "20", 10) || 20));
+  const res = await listSmsLogs(p, l);
+  return c.json(res, 200);
+});
+var sendTestSmsEndpoint = createRoute({
+  method: "post",
+  path: "/api/sms/send-test",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            phone: external_exports.string(),
+            message: external_exports.string()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Test SMS message result",
+      content: { "application/json": { schema: external_exports.object({ result: SmsSendResultSchema }) } }
+    }
+  }
+});
+app.openapi(sendTestSmsEndpoint, async (c) => {
+  const { phone, message } = c.req.valid("json");
+  const result = await sendSMSMessage({
+    recipientPhone: phone,
+    recipientName: "Test Recipient",
+    messageType: "test",
+    content: message
+  });
+  return c.json({ result }, 200);
+});
+var sendAppointmentSmsEndpoint = createRoute({
+  method: "post",
+  path: "/api/sms/send-appointment",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            appointment_id: external_exports.number().int(),
+            type: external_exports.enum(["booking_confirmation", "reminder", "reschedule", "cancellation"])
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Appointment SMS message result",
+      content: { "application/json": { schema: external_exports.object({ result: SmsSendResultSchema.nullable() }) } }
+    },
+    404: {
+      description: "Appointment not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } }
+    }
+  }
+});
+app.openapi(sendAppointmentSmsEndpoint, async (c) => {
+  const { appointment_id, type } = c.req.valid("json");
+  const result = await sendAppointmentSMSNotification(appointment_id, type);
+  if (!result) {
+    return c.json({ error: "Appointment not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+var sendReceiptSmsEndpoint = createRoute({
+  method: "post",
+  path: "/api/sms/send-receipt",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            invoice_id: external_exports.number().int()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Receipt SMS message result",
+      content: { "application/json": { schema: external_exports.object({ result: SmsSendResultSchema.nullable() }) } }
+    },
+    404: {
+      description: "Invoice not found or client has no phone number",
+      content: { "application/json": { schema: ErrorSchema } }
+    }
+  }
+});
+app.openapi(sendReceiptSmsEndpoint, async (c) => {
+  const { invoice_id } = c.req.valid("json");
+  const result = await sendInvoiceReceiptSMSNotification(invoice_id);
+  if (!result) {
+    return c.json({ error: "Invoice not found or client has no phone number" }, 404);
+  }
+  return c.json({ result }, 200);
+});
+var getGrowthInsightsEndpoint = createRoute({
+  method: "get",
+  path: "/api/growth/insights",
+  responses: {
+    200: {
+      description: "Growth insights, inactive client recovery, slow hours, and stylist leaderboard",
+      content: { "application/json": { schema: GrowthInsightsSchema } }
+    }
+  }
+});
+app.openapi(getGrowthInsightsEndpoint, async (c) => {
+  const allClients = await query(
+    "SELECT id, name, phone, email, loyalty_points, total_spent, total_visits, last_visit_date, created_at FROM clients ORDER BY COALESCE(last_visit_date, created_at) ASC"
+  );
+  const now = /* @__PURE__ */ new Date();
+  const inactive_clients = allClients.filter((client) => {
+    const lastDate = client.last_visit_date ? new Date(client.last_visit_date) : new Date(client.created_at);
+    const diffDays = Math.floor((now.getTime() - lastDate.getTime()) / (1e3 * 60 * 60 * 24));
+    return diffDays >= 45 || client.total_visits === 0;
+  }).slice(0, 15).map((client) => {
+    const lastDate = client.last_visit_date ? new Date(client.last_visit_date) : new Date(client.created_at);
+    const days = Math.max(1, Math.floor((now.getTime() - lastDate.getTime()) / (1e3 * 60 * 60 * 24)));
+    const discount = "\u20B9200 OFF on your next hair & spa service";
+    const message = `Hi ${client.name}! We miss you at OpenSalon. It has been ${days} days since your last visit. Treat yourself to \u20B9200 OFF your next service with code COMEBACK200! Reply to book or reserve online.`;
+    return {
+      id: client.id,
+      name: client.name,
+      phone: client.phone || "",
+      days_since_last_visit: days,
+      last_visit_date: client.last_visit_date || client.created_at?.split("T")[0] || "N/A",
+      total_spent: client.total_spent || 0,
+      total_visits: client.total_visits || 0,
+      suggested_discount: discount,
+      suggested_message: message,
+      whatsapp_url: createWaMeUrl(client.phone || "", message)
+    };
+  });
+  const slow_hours = [
+    {
+      day_name: "Monday",
+      slot_label: "Monday 1:00 PM - 5:00 PM",
+      historical_bookings: 2,
+      recommended_deal: "50% OFF Hair Wash & Styling",
+      promo_code: "MONDAY50",
+      estimated_lift: "+4 to 6 bookings/day"
+    },
+    {
+      day_name: "Tuesday",
+      slot_label: "Tuesday 10:00 AM - 2:00 PM",
+      historical_bookings: 3,
+      recommended_deal: "Free Express Manicure with Color",
+      promo_code: "TUESDEAL",
+      estimated_lift: "+3 to 5 bookings/day"
+    },
+    {
+      day_name: "Wednesday",
+      slot_label: "Wednesday 2:00 PM - 6:00 PM",
+      historical_bookings: 4,
+      recommended_deal: "Flat \u20B9150 OFF on orders > \u20B9500",
+      promo_code: "MIDWEEK",
+      estimated_lift: "+4 bookings/day"
+    },
+    {
+      day_name: "Thursday",
+      slot_label: "Thursday 11:00 AM - 3:00 PM",
+      historical_bookings: 5,
+      recommended_deal: "20% OFF Facial & Glow Treatments",
+      promo_code: "GLOW20",
+      estimated_lift: "+3 bookings/day"
+    }
+  ];
+  const stylistRows = await query(`
+    SELECT 
+      s.id as staff_id, s.name as staff_name, s.title as staff_title, s.color as staff_color,
+      COUNT(DISTINCT a.id) as completed_appointments,
+      COALESCE(SUM(CASE WHEN sc.item_type = 'service' THEN sc.item_price ELSE 0 END), 0) as service_revenue,
+      COALESCE(SUM(CASE WHEN sc.item_type = 'product' THEN sc.item_price ELSE 0 END), 0) as product_revenue,
+      COALESCE(SUM(sc.item_price), 0) as total_sales,
+      COALESCE(SUM(sc.commission_amount), 0) as commission_earned
+    FROM staff s
+    LEFT JOIN appointments a ON a.staff_id = s.id AND a.status = 'completed'
+    LEFT JOIN staff_commissions sc ON sc.staff_id = s.id
+    WHERE s.active = 1
+    GROUP BY s.id
+    ORDER BY total_sales DESC, completed_appointments DESC
+  `);
+  const stylist_leaderboard = stylistRows.map((s, idx) => ({
+    staff_id: s.staff_id,
+    staff_name: s.staff_name,
+    staff_title: s.staff_title || "Stylist",
+    staff_color: s.staff_color || "#7c3aed",
+    completed_appointments: s.completed_appointments || 0,
+    service_revenue: s.service_revenue || 0,
+    product_revenue: s.product_revenue || 0,
+    total_sales: s.total_sales || 0,
+    commission_earned: s.commission_earned || 0,
+    rank: idx + 1
+  }));
+  const membersCount = await get("SELECT COUNT(*) as count FROM client_memberships WHERE status = 'active'");
+  const loyaltySum = await get("SELECT COALESCE(SUM(loyalty_points), 0) as total FROM clients");
+  const repeatStats = await get(
+    "SELECT COUNT(*) as total, SUM(CASE WHEN total_visits > 1 THEN 1 ELSE 0 END) as repeats FROM clients"
+  );
+  const invoiceAvg = await get("SELECT COALESCE(AVG(total), 0) as avg_ticket FROM invoices WHERE status = 'paid'");
+  const totalClients = repeatStats?.total || 1;
+  const repeatClients = repeatStats?.repeats || 0;
+  const repeat_client_rate = Math.round(repeatClients / totalClients * 100);
+  return c.json({
+    inactive_clients,
+    slow_hours,
+    stylist_leaderboard,
+    total_members: membersCount?.count || 0,
+    loyalty_points_in_circulation: loyaltySum?.total || 0,
+    repeat_client_rate,
+    avg_ticket_size: Math.round(invoiceAvg?.avg_ticket || 0)
+  }, 200);
+});
+var listMemberships = createRoute({
+  method: "get",
+  path: "/api/memberships",
+  responses: {
+    200: {
+      description: "List all membership packages",
+      content: { "application/json": { schema: external_exports.object({ memberships: external_exports.array(MembershipSchema) }) } }
+    }
+  }
+});
+app.openapi(listMemberships, async (c) => {
+  const rows = await query("SELECT * FROM memberships ORDER BY id ASC");
+  return c.json({ memberships: rows }, 200);
+});
+var createMembership = createRoute({
+  method: "post",
+  path: "/api/memberships",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: MembershipSchema.omit({ id: true, created_at: true })
+        }
+      }
+    }
+  },
+  responses: {
+    201: {
+      description: "Created membership",
+      content: { "application/json": { schema: external_exports.object({ membership: MembershipSchema }) } }
+    }
+  }
+});
+app.openapi(createMembership, async (c) => {
+  const data = c.req.valid("json");
+  const result = await run(
+    `INSERT INTO memberships (
+      name, description, price, duration_days, service_discount_percent,
+      product_discount_percent, included_services_count, bonus_loyalty_points, active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      data.name,
+      data.description || "",
+      String(data.price),
+      String(data.duration_days),
+      String(data.service_discount_percent),
+      String(data.product_discount_percent),
+      String(data.included_services_count),
+      String(data.bonus_loyalty_points),
+      String(data.active)
+    ]
+  );
+  const membership = await get("SELECT * FROM memberships WHERE id = ?", [result.lastInsertRowid]);
+  return c.json({ membership }, 201);
+});
+var updateMembership = createRoute({
+  method: "put",
+  path: "/api/memberships/{id}",
+  request: {
+    params: IdParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: MembershipSchema.omit({ id: true, created_at: true }).partial()
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(updateMembership, async (c) => {
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const sets = [];
+  const params = [];
+  for (const [key, val] of Object.entries(body)) {
+    if (val !== void 0) {
+      sets.push(`${key} = ?`);
+      params.push(String(val));
+    }
+  }
+  if (sets.length > 0) {
+    await run(`UPDATE memberships SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+  }
+  return c.json({ ok: true }, 200);
+});
+var deleteMembership = createRoute({
+  method: "delete",
+  path: "/api/memberships/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(deleteMembership, async (c) => {
+  const { id } = c.req.valid("param");
+  await run("DELETE FROM memberships WHERE id = ?", [id]);
+  return c.json({ ok: true }, 200);
+});
+var listClientMemberships = createRoute({
+  method: "get",
+  path: "/api/client-memberships",
+  responses: {
+    200: {
+      description: "List enrolled client memberships",
+      content: { "application/json": { schema: external_exports.object({ client_memberships: external_exports.array(ClientMembershipSchema) }) } }
+    }
+  }
+});
+app.openapi(listClientMemberships, async (c) => {
+  const rows = await query(`
+    SELECT cm.*, c.name as client_name, c.phone as client_phone, 
+           m.name as membership_name, m.service_discount_percent, m.product_discount_percent
+    FROM client_memberships cm
+    JOIN clients c ON cm.client_id = c.id
+    JOIN memberships m ON cm.membership_id = m.id
+    ORDER BY cm.created_at DESC
+  `);
+  return c.json({ client_memberships: rows }, 200);
+});
+var createClientMembership = createRoute({
+  method: "post",
+  path: "/api/client-memberships",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            client_id: external_exports.number().int(),
+            membership_id: external_exports.number().int()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    201: {
+      description: "Client membership assigned",
+      content: { "application/json": { schema: external_exports.object({ client_membership: ClientMembershipSchema }) } }
+    }
+  }
+});
+app.openapi(createClientMembership, async (c) => {
+  const { client_id, membership_id } = c.req.valid("json");
+  const membership = await get("SELECT * FROM memberships WHERE id = ?", [String(membership_id)]);
+  if (!membership) return c.json({ error: "Membership package not found" }, 404);
+  const startDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const endDateObj = /* @__PURE__ */ new Date();
+  endDateObj.setDate(endDateObj.getDate() + (membership.duration_days || 365));
+  const endDate = endDateObj.toISOString().split("T")[0];
+  const result = await run(
+    `INSERT INTO client_memberships (client_id, membership_id, start_date, end_date, services_total, services_used, status)
+     VALUES (?, ?, ?, ?, ?, 0, 'active')`,
+    [
+      String(client_id),
+      String(membership_id),
+      startDate,
+      endDate,
+      String(membership.included_services_count || 12)
+    ]
+  );
+  const cmId = result.lastInsertRowid;
+  if (membership.bonus_loyalty_points > 0) {
+    await run(
+      "INSERT INTO loyalty_transactions (client_id, points, transaction_type, reference_id, notes) VALUES (?, ?, 'membership_bonus', ?, ?)",
+      [String(client_id), String(membership.bonus_loyalty_points), String(cmId), `Bonus points for purchasing ${membership.name}`]
+    );
+    await run(
+      "UPDATE clients SET loyalty_points = COALESCE(loyalty_points, 0) + ? WHERE id = ?",
+      [String(membership.bonus_loyalty_points), String(client_id)]
+    );
+  }
+  const clientMembership = await get(`
+    SELECT cm.*, c.name as client_name, c.phone as client_phone, 
+           m.name as membership_name, m.service_discount_percent, m.product_discount_percent
+    FROM client_memberships cm
+    JOIN clients c ON cm.client_id = c.id
+    JOIN memberships m ON cm.membership_id = m.id
+    WHERE cm.id = ?
+  `, [cmId]);
+  return c.json({ client_membership: clientMembership }, 201);
+});
+var listLoyaltyTransactions = createRoute({
+  method: "get",
+  path: "/api/loyalty/transactions",
+  responses: {
+    200: {
+      description: "List recent loyalty transactions",
+      content: { "application/json": { schema: external_exports.object({ transactions: external_exports.array(LoyaltyTransactionSchema) }) } }
+    }
+  }
+});
+app.openapi(listLoyaltyTransactions, async (c) => {
+  const rows = await query(`
+    SELECT lt.*, c.name as client_name
+    FROM loyalty_transactions lt
+    JOIN clients c ON lt.client_id = c.id
+    ORDER BY lt.created_at DESC
+    LIMIT 100
+  `);
+  return c.json({ transactions: rows }, 200);
+});
+var adjustLoyaltyPoints = createRoute({
+  method: "post",
+  path: "/api/loyalty/adjust",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            client_id: external_exports.number().int(),
+            points: external_exports.number().int(),
+            notes: external_exports.string().optional()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Points adjusted", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(adjustLoyaltyPoints, async (c) => {
+  const { client_id, points, notes } = c.req.valid("json");
+  await run(
+    "INSERT INTO loyalty_transactions (client_id, points, transaction_type, notes) VALUES (?, ?, 'adjustment', ?)",
+    [String(client_id), String(points), notes || "Manual points adjustment"]
+  );
+  await run(
+    "UPDATE clients SET loyalty_points = MAX(0, COALESCE(loyalty_points, 0) + ?) WHERE id = ?",
+    [String(points), String(client_id)]
+  );
+  return c.json({ ok: true }, 200);
+});
+var listCoupons = createRoute({
+  method: "get",
+  path: "/api/coupons",
+  responses: {
+    200: {
+      description: "List coupons",
+      content: { "application/json": { schema: external_exports.object({ coupons: external_exports.array(CouponSchema) }) } }
+    }
+  }
+});
+app.openapi(listCoupons, async (c) => {
+  const rows = await query("SELECT * FROM coupons ORDER BY created_at DESC");
+  return c.json({ coupons: rows }, 200);
+});
+var createCoupon = createRoute({
+  method: "post",
+  path: "/api/coupons",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: CouponSchema.omit({ id: true, created_at: true, times_used: true })
+        }
+      }
+    }
+  },
+  responses: {
+    201: {
+      description: "Coupon created",
+      content: { "application/json": { schema: external_exports.object({ coupon: CouponSchema }) } }
+    }
+  }
+});
+app.openapi(createCoupon, async (c) => {
+  const data = c.req.valid("json");
+  const result = await run(
+    `INSERT INTO coupons (code, description, discount_type, discount_value, min_order_amount, valid_until, is_active, usage_limit, times_used)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    [
+      data.code.toUpperCase().trim(),
+      data.description || "",
+      data.discount_type,
+      String(data.discount_value),
+      String(data.min_order_amount || 0),
+      data.valid_until || "",
+      String(data.is_active ?? 1),
+      String(data.usage_limit ?? 100)
+    ]
+  );
+  const coupon = await get("SELECT * FROM coupons WHERE id = ?", [result.lastInsertRowid]);
+  return c.json({ coupon }, 201);
+});
+var updateCoupon = createRoute({
+  method: "put",
+  path: "/api/coupons/{id}",
+  request: {
+    params: IdParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: CouponSchema.omit({ id: true, created_at: true }).partial()
+        }
+      }
+    }
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(updateCoupon, async (c) => {
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const sets = [];
+  const params = [];
+  for (const [key, val] of Object.entries(body)) {
+    if (val !== void 0) {
+      sets.push(`${key} = ?`);
+      params.push(key === "code" ? String(val).toUpperCase().trim() : String(val));
+    }
+  }
+  if (sets.length > 0) {
+    await run(`UPDATE coupons SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+  }
+  return c.json({ ok: true }, 200);
+});
+var deleteCoupon = createRoute({
+  method: "delete",
+  path: "/api/coupons/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } }
+  }
+});
+app.openapi(deleteCoupon, async (c) => {
+  const { id } = c.req.valid("param");
+  await run("DELETE FROM coupons WHERE id = ?", [id]);
+  return c.json({ ok: true }, 200);
+});
+var validateCoupon = createRoute({
+  method: "post",
+  path: "/api/coupons/validate",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            code: external_exports.string(),
+            order_amount: external_exports.number()
+          })
+        }
+      }
+    }
+  },
+  responses: {
+    200: {
+      description: "Validation result",
+      content: {
+        "application/json": {
+          schema: external_exports.object({
+            valid: external_exports.boolean(),
+            discount: external_exports.number().optional(),
+            message: external_exports.string().optional(),
+            coupon: CouponSchema.optional()
+          })
+        }
+      }
+    }
+  }
+});
+app.openapi(validateCoupon, async (c) => {
+  const { code, order_amount } = c.req.valid("json");
+  const coupon = await get("SELECT * FROM coupons WHERE code = ? COLLATE NOCASE", [code.trim()]);
+  if (!coupon) {
+    return c.json({ valid: false, message: "Invalid coupon code" }, 200);
+  }
+  if (coupon.is_active === 0) {
+    return c.json({ valid: false, message: "This coupon is currently inactive" }, 200);
+  }
+  if (coupon.valid_until && new Date(coupon.valid_until) < /* @__PURE__ */ new Date()) {
+    return c.json({ valid: false, message: "This coupon has expired" }, 200);
+  }
+  if (coupon.usage_limit && coupon.times_used >= coupon.usage_limit) {
+    return c.json({ valid: false, message: "Coupon usage limit reached" }, 200);
+  }
+  if (coupon.min_order_amount && order_amount < coupon.min_order_amount) {
+    return c.json({ valid: false, message: `Minimum order amount of \u20B9${coupon.min_order_amount} required` }, 200);
+  }
+  let discount = 0;
+  if (coupon.discount_type === "percent") {
+    discount = Math.round(order_amount * coupon.discount_value / 100 * 100) / 100;
+  } else {
+    discount = Math.min(order_amount, coupon.discount_value);
+  }
+  return c.json({ valid: true, discount, coupon }, 200);
+});
+var listStaffCommissions = createRoute({
+  method: "get",
+  path: "/api/staff-commissions",
+  request: {
+    query: external_exports.object({
+      staff_id: external_exports.string().optional()
+    })
+  },
+  responses: {
+    200: {
+      description: "List staff commissions",
+      content: { "application/json": { schema: external_exports.object({ commissions: external_exports.array(StaffCommissionSchema) }) } }
+    }
+  }
+});
+app.openapi(listStaffCommissions, async (c) => {
+  const { staff_id } = c.req.valid("query");
+  let q = `
+    SELECT sc.*, s.name as staff_name
+    FROM staff_commissions sc
+    JOIN staff s ON sc.staff_id = s.id
+  `;
+  const params = [];
+  if (staff_id) {
+    q += " WHERE sc.staff_id = ?";
+    params.push(staff_id);
+  }
+  q += " ORDER BY sc.created_at DESC LIMIT 100";
+  const rows = await query(q, params);
+  return c.json({ commissions: rows }, 200);
 });
 var server_default = app;
 
@@ -11441,7 +13520,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env2, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-kvyZBY/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-TTn6TT/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -11473,7 +13552,7 @@ function __facade_invoke__(request, env2, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-kvyZBY/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-TTn6TT/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
